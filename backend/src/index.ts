@@ -30,6 +30,7 @@ import { SorobanRpc } from "@stellar/stellar-sdk";
 import logger, { createRequestLogger } from "./utils/logger";
 import { pool, PoolExhaustedError } from "./utils/connectionPool";
 import { auditMiddleware } from "./middleware/audit";
+import { authRouter, jwtMiddleware } from "./middleware/auth";
 import { timeoutMiddleware } from "./middleware/timeout";
 import { getAppraisal, setAppraisal, invalidateAll, configureCacheTTL } from "./utils/appraisalCache";
 import { randomUUID } from "crypto";
