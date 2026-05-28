@@ -395,6 +395,10 @@ app.post(
     const validation = registerCollateralSchema.safeParse(req.body);
 
     if (!validation.success) {
+      logger.warn("Validation failed for collateral registration", {
+        requestId: req.requestId,
+        errors: validation.error.errors,
+      });
       return res.status(400).json({
         error: "Validation failed",
         details: validation.error.issues,
@@ -402,12 +406,23 @@ app.post(
     }
 
     const { owner, animal_type, count, appraised_value } = validation.data;
+    logger.debug("Building collateral registration transaction", {
+      requestId: req.requestId,
+      owner,
+      animal_type,
+      count,
+      appraised_value,
+    });
     const xdrTx = await buildContractTx(owner, "register_livestock", [
       new Address(owner).toScVal(),
       nativeToScVal(animal_type, { type: "symbol" }),
       nativeToScVal(count, { type: "u32" }),
       nativeToScVal(BigInt(appraised_value), { type: "i128" }),
     ]);
+    logger.info("Collateral registration transaction built successfully", {
+      requestId: req.requestId,
+      owner,
+    });
     res.json({ xdr: xdrTx });
   }),
 );
@@ -420,6 +435,10 @@ app.post(
     const validation = loanRequestSchema.safeParse(req.body);
 
     if (!validation.success) {
+      logger.warn("Validation failed for loan request", {
+        requestId: req.requestId,
+        errors: validation.error.errors,
+      });
       return res.status(400).json({
         error: "Validation failed",
         details: validation.error.issues,
@@ -477,6 +496,12 @@ app.post(
     }
 
     const { borrower, loan_id, amount } = validation.data;
+    logger.debug("Building loan repayment transaction", {
+      requestId: req.requestId,
+      borrower,
+      loan_id,
+      amount,
+    });
     const xdrTx = await buildContractTx(borrower, "repay_loan", [
       new Address(borrower).toScVal(),
       nativeToScVal(BigInt(loan_id), { type: "u64" }),
