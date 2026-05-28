@@ -5,3 +5,6 @@ target/
 *.wasm
 .env
 *.log
+
+# Performance test results (stored as CI artifacts)
+backend/performance-results/
