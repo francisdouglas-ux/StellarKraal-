@@ -6,6 +6,7 @@ import ConfirmDialog from "@/components/ConfirmDialog";
 import Spinner from "@/components/Spinner";
 import { motion, useReducedMotion } from "framer-motion";
 import { submitVariants } from "@/lib/animations";
+import { Input, Select, Button } from "@/components/ui";
 
 interface Props {
   walletAddress: string;
@@ -33,7 +34,7 @@ interface FormErrors {
 const ANIMAL_TYPES = ["cattle", "goat", "sheep"];
 const HEALTH_STATUSES = ["excellent", "good", "fair", "poor"];
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
-const AUTO_SAVE_INTERVAL = 5000; // 5 seconds
+const AUTO_SAVE_INTERVAL = 5000;
 const STORAGE_KEY = "stellarkraal_collateral_form";
 
 export default function CollateralRegistrationForm({ walletAddress, onSuccess }: Props) {
@@ -53,7 +54,6 @@ export default function CollateralRegistrationForm({ walletAddress, onSuccess }:
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
 
-  // Load saved data on mount
   useEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) {
@@ -62,28 +62,22 @@ export default function CollateralRegistrationForm({ walletAddress, onSuccess }:
         if (parsed.walletAddress === walletAddress && parsed.data) {
           setShowRestorePrompt(true);
         }
-      } catch (e) {
-        // Invalid saved data, ignore
+      } catch {
+        // ignore
       }
     }
   }, [walletAddress]);
 
-  // Auto-save form data
   useEffect(() => {
     const interval = setInterval(() => {
       if (formData.quantity || formData.weight || formData.location || formData.appraisedValue) {
         localStorage.setItem(
           STORAGE_KEY,
-          JSON.stringify({
-            walletAddress,
-            data: formData,
-            timestamp: new Date().toISOString(),
-          })
+          JSON.stringify({ walletAddress, data: formData, timestamp: new Date().toISOString() })
         );
         setLastSaved(new Date());
       }
     }, AUTO_SAVE_INTERVAL);
-
     return () => clearInterval(interval);
   }, [formData, walletAddress]);
 
@@ -92,13 +86,8 @@ export default function CollateralRegistrationForm({ walletAddress, onSuccess }:
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        if (parsed.data) {
-          setFormData(parsed.data);
-          setShowRestorePrompt(false);
-        }
-      } catch (e) {
-        // Invalid saved data
-      }
+        if (parsed.data) { setFormData(parsed.data); setShowRestorePrompt(false); }
+      } catch { /* ignore */ }
     }
   };
 
@@ -109,69 +98,56 @@ export default function CollateralRegistrationForm({ walletAddress, onSuccess }:
 
   const validateField = useCallback((name: keyof FormData, value: string): string | undefined => {
     switch (name) {
-      case "quantity":
+      case "quantity": {
         if (!value) return "Quantity is required";
         const qty = parseInt(value);
         if (isNaN(qty) || qty <= 0) return "Quantity must be a positive number";
         break;
-      case "weight":
+      }
+      case "weight": {
         if (!value) return "Estimated weight is required";
         const wt = parseFloat(value);
         if (isNaN(wt) || wt <= 0) return "Weight must be a positive number";
         break;
+      }
       case "location":
         if (!value || value.trim().length === 0) return "Location is required";
         if (value.trim().length < 3) return "Location must be at least 3 characters";
         break;
-      case "appraisedValue":
+      case "appraisedValue": {
         if (!value) return "Appraised value is required";
         const val = parseInt(value);
         if (isNaN(val) || val <= 0) return "Appraised value must be a positive number";
         break;
+      }
     }
     return undefined;
   }, []);
 
   const handleChange = (name: keyof FormData, value: string) => {
     setFormData((prev) => ({ ...prev, [name]: value }));
-    
-    // Real-time validation
-    const error = validateField(name, value);
-    setErrors((prev) => ({
-      ...prev,
-      [name]: error,
-    }));
+    setErrors((prev) => ({ ...prev, [name]: validateField(name, value) }));
   };
 
   const validateForm = (): boolean => {
     const newErrors: FormErrors = {};
-    
     (Object.keys(formData) as Array<keyof FormData>).forEach((key) => {
       const error = validateField(key, formData[key]);
-      if (error) {
-        newErrors[key] = error;
-      }
+      if (error) newErrors[key] = error;
     });
-
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (!validateForm()) {
-      setStatus("❌ Please fix the errors before submitting");
-      return;
-    }
-
+    if (!validateForm()) return;
     setShowConfirm(true);
   };
 
   const registerCollateral = async () => {
     setLoading(true);
     setStatus(null);
-
     try {
       const res = await fetch(`${API}/api/v1/collateral/register`, {
         method: "POST",
@@ -183,189 +159,115 @@ export default function CollateralRegistrationForm({ walletAddress, onSuccess }:
           appraised_value: parseInt(formData.appraisedValue),
         }),
       });
-
       if (!res.ok) {
         const error = await res.json();
         throw new Error(error.error || "Registration failed");
       }
-
       const { xdr } = await res.json();
       const { signedTxXdr } = await signTransaction(xdr, {
         network: process.env.NEXT_PUBLIC_NETWORK || "TESTNET",
       });
       const result = await submitSignedXdr(signedTxXdr);
-
-      setStatus(`✅ Collateral registered successfully! ID: ${result}`);
-      
-      // Clear saved data on success
+      setStatus(`Collateral registered successfully! ID: ${result}`);
       localStorage.removeItem(STORAGE_KEY);
       setLastSaved(null);
-      
-      // Reset form
-      setFormData({
-        animalType: "cattle",
-        quantity: "",
-        weight: "",
-        healthStatus: "good",
-        location: "",
-        appraisedValue: "",
-      });
+      setFormData({ animalType: "cattle", quantity: "", weight: "", healthStatus: "good", location: "", appraisedValue: "" });
       setErrors({});
-
-      if (onSuccess) {
-        onSuccess(result);
-      }
+      onSuccess?.(result);
     } catch (e: any) {
-      setStatus(`❌ ${e.message}`);
+      setStatus(`error:${e.message}`);
     } finally {
       setLoading(false);
     }
   };
 
+  const isError = status?.startsWith("error:");
+
   return (
     <div className="bg-white rounded-2xl p-6 shadow space-y-4">
       {showRestorePrompt && (
-        <div className="bg-gold/20 border border-gold rounded-lg p-4 mb-4">
-          <p className="text-sm text-brown mb-2">
-            You have unsaved progress. Would you like to restore it?
-          </p>
+        <div className="bg-gold-100 border border-gold-300 rounded-xl p-4">
+          <p className="text-sm text-brown-700 mb-2">You have unsaved progress. Would you like to restore it?</p>
           <div className="flex gap-2">
-            <button
-              onClick={restoreSavedData}
-              className="px-4 py-1.5 bg-gold text-brown rounded-lg text-sm font-medium hover:bg-gold/80"
-            >
-              Restore
-            </button>
-            <button
-              onClick={dismissRestore}
-              className="px-4 py-1.5 bg-brown/10 text-brown rounded-lg text-sm hover:bg-brown/20"
-            >
-              Dismiss
-            </button>
+            <Button size="sm" variant="secondary" onClick={restoreSavedData}>Restore</Button>
+            <Button size="sm" variant="ghost" onClick={dismissRestore}>Dismiss</Button>
           </div>
         </div>
       )}
 
-      <h2 className="text-xl font-semibold text-brown">Register Livestock Collateral</h2>
+      <h2 className="text-xl font-semibold text-brown-700">Register Livestock Collateral</h2>
 
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div>
-          <label className="block text-sm font-medium text-brown mb-1">
-            Animal Type <span className="text-red-500">*</span>
-          </label>
-          <select
-            className="w-full border border-brown/30 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-gold"
-            value={formData.animalType}
-            onChange={(e) => handleChange("animalType", e.target.value)}
-            disabled={loading}
-          >
-            {ANIMAL_TYPES.map((type) => (
-              <option key={type} value={type}>
-                {type.charAt(0).toUpperCase() + type.slice(1)}
-              </option>
-            ))}
-          </select>
-        </div>
+      <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+        <Select
+          label="Animal Type"
+          required
+          value={formData.animalType}
+          onChange={(e) => handleChange("animalType", e.target.value)}
+          disabled={loading}
+        >
+          {ANIMAL_TYPES.map((type) => (
+            <option key={type} value={type}>{type.charAt(0).toUpperCase() + type.slice(1)}</option>
+          ))}
+        </Select>
 
-        <div>
-          <label className="block text-sm font-medium text-brown mb-1">
-            Quantity <span className="text-red-500">*</span>
-          </label>
-          <input
-            type="number"
-            className={`w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-gold ${
-              errors.quantity ? "border-red-500" : "border-brown/30"
-            }`}
-            placeholder="Number of animals"
-            value={formData.quantity}
-            onChange={(e) => handleChange("quantity", e.target.value)}
-            disabled={loading}
-          />
-          {errors.quantity && (
-            <p className="text-red-500 text-xs mt-1">{errors.quantity}</p>
-          )}
-        </div>
+        <Input
+          label="Quantity"
+          required
+          type="number"
+          placeholder="Number of animals"
+          value={formData.quantity}
+          onChange={(e) => handleChange("quantity", e.target.value)}
+          error={errors.quantity}
+          disabled={loading}
+        />
 
-        <div>
-          <label className="block text-sm font-medium text-brown mb-1">
-            Estimated Weight (kg) <span className="text-red-500">*</span>
-          </label>
-          <input
-            type="number"
-            step="0.1"
-            className={`w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-gold ${
-              errors.weight ? "border-red-500" : "border-brown/30"
-            }`}
-            placeholder="Average weight per animal"
-            value={formData.weight}
-            onChange={(e) => handleChange("weight", e.target.value)}
-            disabled={loading}
-          />
-          {errors.weight && (
-            <p className="text-red-500 text-xs mt-1">{errors.weight}</p>
-          )}
-        </div>
+        <Input
+          label="Estimated Weight (kg)"
+          required
+          type="number"
+          step="0.1"
+          placeholder="Average weight per animal"
+          value={formData.weight}
+          onChange={(e) => handleChange("weight", e.target.value)}
+          error={errors.weight}
+          disabled={loading}
+        />
 
-        <div>
-          <label className="block text-sm font-medium text-brown mb-1">
-            Health Status <span className="text-red-500">*</span>
-          </label>
-          <select
-            className="w-full border border-brown/30 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-gold"
-            value={formData.healthStatus}
-            onChange={(e) => handleChange("healthStatus", e.target.value)}
-            disabled={loading}
-          >
-            {HEALTH_STATUSES.map((status) => (
-              <option key={status} value={status}>
-                {status.charAt(0).toUpperCase() + status.slice(1)}
-              </option>
-            ))}
-          </select>
-        </div>
+        <Select
+          label="Health Status"
+          required
+          value={formData.healthStatus}
+          onChange={(e) => handleChange("healthStatus", e.target.value)}
+          disabled={loading}
+        >
+          {HEALTH_STATUSES.map((s) => (
+            <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>
+          ))}
+        </Select>
 
-        <div>
-          <label className="block text-sm font-medium text-brown mb-1">
-            Location <span className="text-red-500">*</span>
-          </label>
-          <input
-            type="text"
-            className={`w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-gold ${
-              errors.location ? "border-red-500" : "border-brown/30"
-            }`}
-            placeholder="Farm or region name"
-            value={formData.location}
-            onChange={(e) => handleChange("location", e.target.value)}
-            disabled={loading}
-          />
-          {errors.location && (
-            <p className="text-red-500 text-xs mt-1">{errors.location}</p>
-          )}
-        </div>
+        <Input
+          label="Location"
+          required
+          type="text"
+          placeholder="Farm or region name"
+          value={formData.location}
+          onChange={(e) => handleChange("location", e.target.value)}
+          error={errors.location}
+          disabled={loading}
+        />
 
-        <div>
-          <label className="block text-sm font-medium text-brown mb-1">
-            Appraised Value (stroops) <span className="text-red-500">*</span>
-          </label>
-          <input
-            type="number"
-            className={`w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-gold ${
-              errors.appraisedValue ? "border-red-500" : "border-brown/30"
-            }`}
-            placeholder="Total value in stroops"
-            value={formData.appraisedValue}
-            onChange={(e) => handleChange("appraisedValue", e.target.value)}
-            disabled={loading}
-          />
-          {errors.appraisedValue && (
-            <p className="text-red-500 text-xs mt-1">{errors.appraisedValue}</p>
-          )}
-        </div>
+        <Input
+          label="Appraised Value (stroops)"
+          required
+          type="number"
+          placeholder="Total value in stroops"
+          value={formData.appraisedValue}
+          onChange={(e) => handleChange("appraisedValue", e.target.value)}
+          error={errors.appraisedValue}
+          disabled={loading}
+        />
 
-        <motion.button
-          type="button"
-          onClick={handleSubmit}
-          disabled={loading || Object.keys(errors).some((key) => errors[key as keyof FormErrors])}
+        <motion.div
           variants={reduced ? undefined : submitVariants}
           animate={loading ? "loading" : "idle"}
           className="w-full bg-brown text-cream py-2.5 rounded-xl font-semibold hover:bg-brown/80 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
@@ -382,20 +284,19 @@ export default function CollateralRegistrationForm({ walletAddress, onSuccess }:
       </form>
 
       {lastSaved && !loading && (
-        <p className="text-xs text-brown/60 text-center">
+        <p className="text-xs text-brown-400 text-center">
           Auto-saved at {lastSaved.toLocaleTimeString()}
         </p>
       )}
 
       {status && (
         <div
-          className={`p-3 rounded-lg text-sm ${
-            status.startsWith("✅")
-              ? "bg-green-50 text-green-800"
-              : "bg-red-50 text-red-800"
+          role="status"
+          className={`p-3 rounded-xl text-sm ${
+            isError ? "bg-error-light text-error-dark" : "bg-success-light text-success-dark"
           }`}
         >
-          {status}
+          {isError ? status.replace("error:", "") : status}
         </div>
       )}
 

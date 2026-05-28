@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import WalletConnect from "@/components/WalletConnect";
 import CollateralSummary from "@/components/CollateralSummary";
 import CollateralGrid from "@/components/CollateralGrid";
+import { Button } from "@/components/ui";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
 
@@ -65,24 +66,21 @@ export default function CollateralPage() {
               />
             </>
           ) : (
-            <div className="bg-white rounded-2xl p-12 shadow text-center">
-              <h2 className="text-2xl font-semibold text-brown mb-3">
+            <div className="bg-white rounded-2xl p-8 sm:p-12 shadow text-center">
+              <h2 className="text-2xl font-semibold text-brown-700 mb-3">
                 No Collateral Registered
               </h2>
-              <p className="text-brown/60 mb-6">
+              <p className="text-brown-400 mb-6">
                 Register livestock as collateral to start borrowing
               </p>
-              <button
-                onClick={() => router.push("/borrow")}
-                className="bg-brown text-cream px-6 py-3 rounded-xl font-semibold hover:bg-brown/80 transition"
-              >
+              <Button onClick={() => router.push("/borrow")}>
                 Register Collateral
-              </button>
+              </Button>
             </div>
           )}
 
           {error && (
-            <div className="mt-4 bg-red-50 border border-red-200 rounded-lg p-4 text-red-700">
+            <div role="alert" className="mt-4 bg-error-light border border-error rounded-xl p-4 text-error-dark text-sm">
               {error}
             </div>
           )}

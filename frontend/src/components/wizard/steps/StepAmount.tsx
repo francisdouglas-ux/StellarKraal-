@@ -1,6 +1,7 @@
 "use client";
 import { useWizard } from "@/context/LoanWizardContext";
 import { GlossaryTerm } from "@/components/GlossaryTerm";
+import { Input, Button } from "@/components/ui";
 
 const TERM_OPTIONS = [
   { days: "7", label: "7 days", rate: "2%" },
@@ -59,31 +60,27 @@ export default function StepAmount() {
 
       {/* Amount input */}
       <div>
-        <label className="block text-sm font-medium text-brown mb-1">Loan Amount (stroops)</label>
-        <div className="relative">
-          <input
-            type="number"
-            min="1"
-            max={maxLoan}
-            placeholder="e.g. 5000000"
-            value={loanAmount}
-            onChange={(e) => setField("loanAmount", e.target.value)}
-            className="w-full border border-brown/30 rounded-xl px-4 py-3 pr-16 text-brown placeholder-brown/40 focus:outline-none focus:border-gold focus:ring-2 focus:ring-gold/20 transition"
-          />
-          <span className="absolute right-4 top-1/2 -translate-y-1/2 text-brown/40 text-sm">XLM</span>
-        </div>
+        <Input
+          label="Loan Amount (stroops)"
+          type="number"
+          min="1"
+          max={maxLoan}
+          placeholder="e.g. 5000000"
+          value={loanAmount}
+          onChange={(e) => setField("loanAmount", e.target.value)}
+        />
 
         {/* LTV slider indicator */}
         {loanAmount && maxLoan > 0 && (
           <div className="mt-2">
-            <div className="flex justify-between text-xs text-brown/50 mb-1">
+            <div className="flex justify-between text-xs text-brown-400 mb-1">
               <span><GlossaryTerm termKey="ltv">LTV</GlossaryTerm>: {ltv}%</span>
               <span>Max: 70%</span>
             </div>
-            <div className="h-2 bg-brown/10 rounded-full overflow-hidden">
+            <div className="h-2 bg-brown-100 rounded-full overflow-hidden">
               <div
                 className={`h-full rounded-full transition-all ${
-                  parseFloat(ltv) > 65 ? "bg-red-500" : parseFloat(ltv) > 50 ? "bg-yellow-500" : "bg-green-500"
+                  parseFloat(ltv) > 65 ? "bg-error" : parseFloat(ltv) > 50 ? "bg-warning" : "bg-success"
                 }`}
                 style={{ width: `${Math.min(parseFloat(ltv), 70) / 70 * 100}%` }}
               />
@@ -122,24 +119,14 @@ export default function StepAmount() {
       )}
 
       {error && (
-        <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-red-600 text-sm">
+        <div role="alert" className="bg-error-light border border-error rounded-xl px-4 py-3 text-error-dark text-sm">
           {error}
         </div>
       )}
 
       <div className="flex gap-3">
-        <button
-          onClick={prevStep}
-          className="flex-1 border-2 border-brown/30 text-brown py-3 rounded-xl font-semibold hover:border-brown/60 transition"
-        >
-          ← Back
-        </button>
-        <button
-          onClick={handleNext}
-          className="flex-[2] bg-brown text-cream py-3 rounded-xl font-semibold hover:bg-brown/80 transition"
-        >
-          Review Terms →
-        </button>
+        <Button variant="ghost" className="flex-1" onClick={prevStep}>← Back</Button>
+        <Button className="flex-[2]" onClick={handleNext}>Review Terms →</Button>
       </div>
     </div>
   );

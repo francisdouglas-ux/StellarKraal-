@@ -15,24 +15,35 @@ const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
 export default function RepayPanel({ walletAddress }: Props) {
   const [loanId, setLoanId] = useState("");
   const [amount, setAmount] = useState("");
-  const [status, setStatus] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const toast = useToast();
 
   async function repay() {
     setLoading(true);
-    setStatus(null);
     try {
       const res = await fetch(`${API}/api/loan/repay`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ borrower: walletAddress, loan_id: parseInt(loanId), amount: parseInt(amount) }),
+        body: JSON.stringify({
+          borrower: walletAddress,
+          loan_id: parseInt(loanId),
+          amount: parseInt(amount),
+        }),
       });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Repayment failed");
+      }
       const { xdr } = await res.json();
-      const { signedTxXdr } = await signTransaction(xdr, { network: process.env.NEXT_PUBLIC_NETWORK || "TESTNET" });
+      const { signedTxXdr } = await signTransaction(xdr, {
+        network: process.env.NEXT_PUBLIC_NETWORK || "TESTNET",
+      });
       await submitSignedXdr(signedTxXdr);
-      setStatus("✅ Repayment submitted!");
+      toast.success("Repayment submitted successfully!");
+      setLoanId("");
+      setAmount("");
     } catch (e: any) {
-      setStatus(`❌ ${e.message}`);
+      toast.error(e.message || "Something went wrong. Please try again.");
     } finally {
       setLoading(false);
     }
