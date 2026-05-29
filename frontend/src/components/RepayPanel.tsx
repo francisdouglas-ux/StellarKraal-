@@ -39,13 +39,15 @@ export default function RepayPanel({ walletAddress }: Props) {
     <div className="bg-white rounded-2xl p-6 shadow mb-4">
       <h2 className="text-xl font-semibold text-brown mb-3">Repay Loan</h2>
       <div className="space-y-3">
-        <input className="w-full border border-brown/30 rounded-lg px-3 py-2" placeholder="Loan ID" value={loanId} onChange={(e) => setLoanId(e.target.value)} type="number" />
-        <input className="w-full border border-brown/30 rounded-lg px-3 py-2" placeholder="Amount (stroops)" value={amount} onChange={(e) => setAmount(e.target.value)} type="number" />
-        <button onClick={repay} disabled={loading} className="w-full bg-gold text-brown py-2.5 rounded-xl font-semibold hover:bg-gold/80 transition disabled:opacity-50">
+        <label htmlFor="repay-loan-id" className="sr-only">Loan ID</label>
+        <input id="repay-loan-id" className="w-full border border-brown/30 rounded-lg px-3 py-2" placeholder="Loan ID" value={loanId} onChange={(e) => setLoanId(e.target.value)} type="number" />
+        <label htmlFor="repay-amount" className="sr-only">Amount (stroops)</label>
+        <input id="repay-amount" className="w-full border border-brown/30 rounded-lg px-3 py-2" placeholder="Amount (stroops)" value={amount} onChange={(e) => setAmount(e.target.value)} type="number" />
+        <button onClick={repay} disabled={loading} aria-busy={loading} className="w-full bg-gold text-brown py-2.5 rounded-xl font-semibold hover:bg-gold/80 transition disabled:opacity-50">
           {loading ? "Processing…" : "Repay"}
         </button>
       </div>
-      {status && <p className="text-sm mt-2">{status}</p>}
+      {status && <p className="text-sm mt-2" aria-live="polite">{status}</p>}
     </div>
   );
 }

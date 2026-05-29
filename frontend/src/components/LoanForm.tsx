@@ -75,30 +75,36 @@ export default function LoanForm({ walletAddress }: Props) {
       {step === "collateral" ? (
         <>
           <h2 className="text-xl font-semibold text-brown">1. Register Collateral</h2>
+          <label htmlFor="animal-type" className="sr-only">Animal type</label>
           <select
+            id="animal-type"
             className="w-full border border-brown/30 rounded-lg px-3 py-2"
             value={animalType}
             onChange={(e) => setAnimalType(e.target.value)}
           >
             {ANIMAL_TYPES.map((a) => <option key={a}>{a}</option>)}
           </select>
-          <input className="w-full border border-brown/30 rounded-lg px-3 py-2" placeholder="Count" value={count} onChange={(e) => setCount(e.target.value)} type="number" />
-          <input className="w-full border border-brown/30 rounded-lg px-3 py-2" placeholder="Appraised value (stroops)" value={appraisedValue} onChange={(e) => setAppraisedValue(e.target.value)} type="number" />
-          <button onClick={registerCollateral} disabled={loading} className="w-full bg-brown text-cream py-2.5 rounded-xl font-semibold hover:bg-brown/80 transition disabled:opacity-50">
+          <label htmlFor="animal-count" className="sr-only">Count</label>
+          <input id="animal-count" className="w-full border border-brown/30 rounded-lg px-3 py-2" placeholder="Count" value={count} onChange={(e) => setCount(e.target.value)} type="number" />
+          <label htmlFor="appraised-value" className="sr-only">Appraised value (stroops)</label>
+          <input id="appraised-value" className="w-full border border-brown/30 rounded-lg px-3 py-2" placeholder="Appraised value (stroops)" value={appraisedValue} onChange={(e) => setAppraisedValue(e.target.value)} type="number" />
+          <button onClick={registerCollateral} disabled={loading} aria-busy={loading} className="w-full bg-brown text-cream py-2.5 rounded-xl font-semibold hover:bg-brown/80 transition disabled:opacity-50">
             {loading ? "Processing…" : "Register & Continue"}
           </button>
         </>
       ) : (
         <>
           <h2 className="text-xl font-semibold text-brown">2. Request Loan</h2>
-          <input className="w-full border border-brown/30 rounded-lg px-3 py-2" placeholder="Collateral ID" value={collateralId} onChange={(e) => setCollateralId(e.target.value)} type="number" />
-          <input className="w-full border border-brown/30 rounded-lg px-3 py-2" placeholder="Loan amount (stroops)" value={loanAmount} onChange={(e) => setLoanAmount(e.target.value)} type="number" />
-          <button onClick={requestLoan} disabled={loading} className="w-full bg-gold text-brown py-2.5 rounded-xl font-semibold hover:bg-gold/80 transition disabled:opacity-50">
+          <label htmlFor="collateral-id" className="sr-only">Collateral ID</label>
+          <input id="collateral-id" className="w-full border border-brown/30 rounded-lg px-3 py-2" placeholder="Collateral ID" value={collateralId} onChange={(e) => setCollateralId(e.target.value)} type="number" />
+          <label htmlFor="loan-amount" className="sr-only">Loan amount (stroops)</label>
+          <input id="loan-amount" className="w-full border border-brown/30 rounded-lg px-3 py-2" placeholder="Loan amount (stroops)" value={loanAmount} onChange={(e) => setLoanAmount(e.target.value)} type="number" />
+          <button onClick={requestLoan} disabled={loading} aria-busy={loading} className="w-full bg-gold text-brown py-2.5 rounded-xl font-semibold hover:bg-gold/80 transition disabled:opacity-50">
             {loading ? "Processing…" : "Request Loan"}
           </button>
         </>
       )}
-      {status && <p className="text-sm mt-2">{status}</p>}
+      {status && <p className="text-sm mt-2" aria-live="polite">{status}</p>}
     </div>
   );
 }

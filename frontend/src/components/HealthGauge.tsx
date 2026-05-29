@@ -12,13 +12,18 @@ export default function HealthGauge({ value }: Props) {
   const label = value >= 10_000 ? "Healthy" : "At Risk";
 
   return (
-    <div className="mt-4">
+    <div className="mt-4" role="status" aria-live="polite" aria-label={`Health factor: ${(value / 10_000).toFixed(2)}x, ${label}`}>
       <div className="flex justify-between text-sm mb-1">
         <span className="font-semibold" style={{ color }}>{label}</span>
         <span className="text-brown/60">{(value / 10_000).toFixed(2)}x</span>
       </div>
       <div className="w-full bg-brown/10 rounded-full h-4 overflow-hidden">
         <div
+          role="progressbar"
+          aria-valuenow={pct}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-label="Health factor gauge"
           className="h-4 rounded-full transition-all duration-500"
           style={{ width: `${pct}%`, backgroundColor: color }}
         />
