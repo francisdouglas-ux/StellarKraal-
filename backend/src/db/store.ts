@@ -17,11 +17,15 @@ export interface CollateralRecord {
   deletedAt: string | null;
 }
 
+export type LoanStatus = "active" | "at_risk" | "repaid" | "liquidated";
+
 export interface LoanRecord {
   id: string;
   borrower: string;
   collateral_id: string;
   amount: number;
+  status: LoanStatus;
+  health_factor: number | null;
   createdAt: string;
   deletedAt: string | null;
 }
@@ -120,10 +124,40 @@ export function listDeletedCollateral(): CollateralRecord[] {
  * @example
  * const loan = insertLoan({ id: "1", borrower: "G...", collateral_id: "1", amount: 600000 });
  */
-export function insertLoan(data: Omit<LoanRecord, "createdAt" | "deletedAt">): LoanRecord {
-  const record: LoanRecord = { ...data, createdAt: new Date().toISOString(), deletedAt: null };
+export function insertLoan(data: Omit<LoanRecord, "createdAt" | "deletedAt" | "status" | "health_factor"> & Partial<Pick<LoanRecord, "status" | "health_factor">>): LoanRecord {
+  const record: LoanRecord = {
+    status: "active",
+    health_factor: null,
+    ...data,
+    createdAt: new Date().toISOString(),
+    deletedAt: null,
+  };
   loanTable.set(record.id, record);
   return record;
+}
+
+/**
+ * Update mutable fields on an existing loan record.
+ * @param id - Loan record ID.
+ * @param updates - Partial fields to merge.
+ * @returns The updated {@link LoanRecord}, or `undefined` if not found.
+ */
+export function updateLoan(id: string, updates: Partial<Pick<LoanRecord, "status" | "health_factor">>): LoanRecord | undefined {
+  const record = loanTable.get(id);
+  if (!record) return undefined;
+  const updated = { ...record, ...updates };
+  loanTable.set(id, updated);
+  return updated;
+}
+
+/**
+ * Return all non-deleted loans with status `active` or `at_risk`.
+ * @returns Array of active {@link LoanRecord} objects.
+ */
+export function listActiveLoans(): LoanRecord[] {
+  return [...loanTable.values()].filter(
+    (r) => r.deletedAt === null && (r.status === "active" || r.status === "at_risk")
+  );
 }
 
 /**
