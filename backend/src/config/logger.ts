@@ -15,9 +15,11 @@ const prettyFormat = winston.format.combine(
   winston.format.timestamp({ format: "YYYY-MM-DD HH:mm:ss" }),
   winston.format.errors({ stack: true }),
   winston.format.colorize(),
-  winston.format.printf(({ timestamp, level, message, requestId, ...meta }) => {
+  winston.format.printf(({ timestamp, level, message, requestId, correlationId, ...meta }) => {
     let log = `${timestamp} [${level}]`;
-    if (requestId) {
+    if (correlationId) {
+      log += ` [${correlationId}]`;
+    } else if (requestId) {
       log += ` [${requestId}]`;
     }
     log += `: ${message}`;

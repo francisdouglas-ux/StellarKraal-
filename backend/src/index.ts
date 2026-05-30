@@ -19,6 +19,10 @@ import {
   type TransactionStatus,
 } from "./db/store";
 import { corsMiddleware } from "./middleware/cors";
+import { correlationMiddleware } from "./middleware/correlation";
+import { loggingMiddleware } from "./middleware/logging";
+import {
+  Networks,
 import {
   Networks,
   TransactionBuilder,
@@ -104,6 +108,8 @@ app.use(corsMiddleware);
 app.use(express.json());
 app.use(globalLimiter);
 app.use(timeoutMiddleware(parseInt(config.TIMEOUT_GLOBAL_MS, 10)));
+app.use(correlationMiddleware);
+app.use(loggingMiddleware);
 
 // Request ID middleware
 app.use((req: Request, res: Response, next: NextFunction) => {
