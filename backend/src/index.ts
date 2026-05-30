@@ -10,19 +10,21 @@ import {
   restoreLoan,
   softDeleteLoan,
 } from "./db/store";
-import cors from "cors";
+import { corsMiddleware } from "./middleware/cors";
 import {
   Networks,
   TransactionBuilder,
   BASE_FEE,
   Contract,
   nativeToScVal,
+  scValToNative,
   Address,
   xdr,
 } from "@stellar/stellar-sdk";
 import logger, { createRequestLogger } from "./utils/logger";
 import { pool, PoolExhaustedError } from "./utils/connectionPool";
 import { auditMiddleware } from "./middleware/audit";
+import { authRouter, jwtMiddleware } from "./middleware/auth";
 import { timeoutMiddleware } from "./middleware/timeout";
 import { authRouter, jwtMiddleware } from "./middleware/auth";
 import {
@@ -33,7 +35,7 @@ import {
 } from "./utils/appraisalCache";
 import { randomUUID } from "crypto";
 import { z } from "zod";
-import { globalLimiter } from "./middleware/rateLimit";
+import { globalLimiter, authLimiter } from "./middleware/rateLimit";
 import { asyncHandler } from "./utils/asyncHandler";
 import { stellarPublicKeySchema } from "./validators/stellar";
 import rpcClient from "./utils/rpcClient";
@@ -98,6 +100,19 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   next();
 });
 
+// Shutdown middleware - reject new requests during graceful shutdown
+let isShuttingDown = false;
+app.use((req: Request, res: Response, next: NextFunction) => {
+  if (isShuttingDown) {
+    res.setHeader("Connection", "close");
+    return res.status(503).json({
+      error: "Server is shutting down",
+      message: "Please retry your request",
+    });
+  }
+  next();
+});
+
 // Request logging middleware
 app.use((req: Request, res: Response, next: NextFunction) => {
   const reqLogger = (req as any).logger;
@@ -111,8 +126,22 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 // Audit logging middleware — logs all requests with redacted body to audit log
 app.use(auditMiddleware);
 
+// ── Prometheus instrumentation middleware ─────────────────────────────────────
+app.use((req: Request, res: Response, next: NextFunction) => {
+  httpActiveConnections.inc();
+  const end = httpRequestDurationSeconds.startTimer();
+  res.on("finish", () => {
+    const route = (req.route?.path as string) ?? req.path;
+    const labels = { method: req.method, route, status_code: String(res.statusCode) };
+    httpRequestsTotal.inc(labels);
+    end(labels);
+    httpActiveConnections.dec();
+  });
+  next();
+});
+
 // ── Auth ──────────────────────────────────────────────────────────────────────
-app.use("/api/auth", authRouter);
+app.use("/api/auth", authLimiter, authRouter);
 app.use(jwtMiddleware);
 
 const CONTRACT_ID = process.env.CONTRACT_ID || "";
@@ -125,8 +154,21 @@ const startTime = Date.now();
 // Configure appraisal cache TTL from env
 configureCacheTTL(parseInt(config.APPRAISAL_CACHE_TTL_MS, 10));
 
-// Run DB migrations on startup
-runMigrations();
+// Run DB migrations on startup (automatic in development, manual in production)
+(async () => {
+  try {
+    await runMigrations();
+  } catch (error) {
+    logger.error("Failed to run migrations on startup", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    // In production, fail fast if migrations haven't been run
+    if (process.env.NODE_ENV === "production") {
+      logger.error("Production startup aborted due to migration failure");
+      process.exit(1);
+    }
+  }
+})();
 
 // ── Validation Schemas ────────────────────────────────────────────────────────
 
@@ -148,6 +190,100 @@ const loanRepaySchema = z.object({
   loan_id: z.number().int().nonnegative(),
   amount: z.number().int().positive(),
 });
+
+const loanRepaymentPreviewSchema = z.object({
+  loan_id: z.number().int().nonnegative(),
+  amount: z.number().int().positive(),
+});
+
+type LoanPreviewShape = {
+  principal: number;
+  outstanding: number;
+  collateral_value: number;
+};
+
+type FeeConfigShape = {
+  interest_fee_bps: number;
+};
+
+function toNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "bigint") return Number(value);
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function normalizeNativeScVal(value: unknown): unknown {
+  if (value instanceof Map) {
+    return Object.fromEntries(
+      Array.from(value.entries()).map(([k, v]) => [
+        String(k),
+        normalizeNativeScVal(v),
+      ]),
+    );
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeNativeScVal(item));
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([k, v]) => [
+        k,
+        normalizeNativeScVal(v),
+      ]),
+    );
+  }
+  return value;
+}
+
+function parseLoanFromSimulation(retval: unknown): LoanPreviewShape {
+  const fallbackValue = toNumber((retval as { value?: unknown })?.value);
+  if (fallbackValue !== null) {
+    return {
+      principal: fallbackValue,
+      outstanding: fallbackValue,
+      collateral_value: fallbackValue,
+    };
+  }
+
+  const native = normalizeNativeScVal(scValToNative(retval as xdr.ScVal));
+  if (!native || typeof native !== "object") {
+    throw new Error("Unable to decode loan record");
+  }
+
+  const n = native as Record<string, unknown>;
+  const principal = toNumber(n.principal);
+  const outstanding = toNumber(n.outstanding);
+  const collateralValue = toNumber(n.collateral_value);
+
+  if (principal === null || outstanding === null || collateralValue === null) {
+    throw new Error("Loan record is missing numeric fields");
+  }
+
+  return {
+    principal,
+    outstanding,
+    collateral_value: collateralValue,
+  };
+}
+
+function parseFeeConfigFromSimulation(retval: unknown): FeeConfigShape | null {
+  const native = normalizeNativeScVal(scValToNative(retval as xdr.ScVal));
+  if (!native || typeof native !== "object") {
+    return null;
+  }
+
+  const n = native as Record<string, unknown>;
+  const interestFeeBps = toNumber(n.interest_fee_bps);
+  if (interestFeeBps === null) {
+    return null;
+  }
+
+  return { interest_fee_bps: interestFeeBps };
+}
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 async function buildContractTx(
@@ -209,19 +345,34 @@ app.post(
     const validation = registerCollateralSchema.safeParse(req.body);
 
     if (!validation.success) {
+      logger.warn("Validation failed for collateral registration", {
+        requestId: req.requestId,
+        errors: validation.error.errors,
+      });
       return res.status(400).json({
         error: "Validation failed",
-        details: validation.error.errors,
+        details: validation.error.issues,
       });
     }
 
     const { owner, animal_type, count, appraised_value } = validation.data;
+    logger.debug("Building collateral registration transaction", {
+      requestId: req.requestId,
+      owner,
+      animal_type,
+      count,
+      appraised_value,
+    });
     const xdrTx = await buildContractTx(owner, "register_livestock", [
       new Address(owner).toScVal(),
       nativeToScVal(animal_type, { type: "symbol" }),
       nativeToScVal(count, { type: "u32" }),
       nativeToScVal(BigInt(appraised_value), { type: "i128" }),
     ]);
+    logger.info("Collateral registration transaction built successfully", {
+      requestId: req.requestId,
+      owner,
+    });
     res.json({ xdr: xdrTx });
   }),
 );
@@ -234,9 +385,13 @@ app.post(
     const validation = loanRequestSchema.safeParse(req.body);
 
     if (!validation.success) {
+      logger.warn("Validation failed for loan request", {
+        requestId: req.requestId,
+        errors: validation.error.errors,
+      });
       return res.status(400).json({
         error: "Validation failed",
-        details: validation.error.errors,
+        details: validation.error.issues,
       });
     }
 
@@ -257,6 +412,7 @@ app.post(
       nativeToScVal(BigInt(collateral_id), { type: "u64" }),
       nativeToScVal(BigInt(amount), { type: "i128" }),
     ]);
+    fireWebhooks("loan.approved", { borrower, collateral_id, amount });
     res.json({ xdr: xdrTx, ...(cached?.stale ? { stale: true } : {}) });
   }),
 );
@@ -434,6 +590,15 @@ app.get("/api/admin/webhooks/logs", (req: Request, res: Response) => {
   res.json(getDeliveryLogs());
 });
 
+// GET /api/admin/migrations/status — migration status
+app.get(
+  "/api/admin/migrations/status",
+  asyncHandler(async (req: Request, res: Response) => {
+    const status = await getMigrationStatus();
+    res.json({ status });
+  }),
+);
+
 // ── soft-delete admin routes ──────────────────────────────────────────────────
 
 // GET /api/admin/deleted/collateral — list soft-deleted collateral records
@@ -451,6 +616,64 @@ app.post("/api/admin/restore/collateral/:id", (req: Request, res: Response) => {
 
 // DELETE /api/collateral/:id — soft delete a collateral record
 app.delete("/api/collateral/:id", (req: Request, res: Response) => {
+  const ok = softDeleteCollateral(req.params.id);
+  if (!ok) return res.status(404).json({ error: "Record not found" });
+  res.json({ deleted: true, id: req.params.id });
+});
+
+// ── v1 collateral CRUD ────────────────────────────────────────────────────────
+
+const v1CollateralSchema = z.object({
+  owner: stellarPublicKeySchema,
+  animal_type: z.string().min(1),
+  count: z.number().int().positive(),
+  appraised_value: z.number().int().positive(),
+});
+
+// POST /api/v1/collateral — register collateral (DB record)
+app.post("/api/v1/collateral", timeoutMiddleware(parseInt(config.TIMEOUT_WRITE_MS, 10)), asyncHandler(async (req: Request, res: Response) => {
+  const validation = v1CollateralSchema.safeParse(req.body);
+  if (!validation.success) {
+    return res.status(400).json({ error: "Validation failed", details: validation.error.errors });
+  }
+  const { owner, animal_type, count, appraised_value } = validation.data;
+  const record = insertCollateral({ id: randomUUID(), owner, animal_type, count, appraised_value });
+  res.status(201).json(record);
+}));
+
+// GET /api/v1/collateral — list collateral with optional filters and pagination
+app.get("/api/v1/collateral", asyncHandler(async (req: Request, res: Response) => {
+  const page = req.query.page !== undefined ? Number(req.query.page) : 1;
+  const pageSize = req.query.pageSize !== undefined ? Number(req.query.pageSize) : 20;
+  if (!Number.isInteger(page) || page < 1) {
+    return res.status(400).json({ error: "page must be a positive integer" });
+  }
+  if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100) {
+    return res.status(400).json({ error: "pageSize must be between 1 and 100" });
+  }
+  let records = listCollateral();
+  if (req.query.owner) records = records.filter((r) => r.owner === req.query.owner);
+  if (req.query.animal_type) records = records.filter((r) => r.animal_type === req.query.animal_type);
+  const total = records.length;
+  const data = records.slice((page - 1) * pageSize, page * pageSize);
+  res.json({ data, total, page, pageSize });
+}));
+
+// PUT /api/v1/collateral/:id/appraise — update appraised_value
+app.put("/api/v1/collateral/:id/appraise", timeoutMiddleware(parseInt(config.TIMEOUT_WRITE_MS, 10)), asyncHandler(async (req: Request, res: Response) => {
+  const { appraised_value } = req.body;
+  if (typeof appraised_value !== "number" || !Number.isInteger(appraised_value) || appraised_value <= 0) {
+    return res.status(400).json({ error: "appraised_value must be a positive integer" });
+  }
+  const record = getCollateral(req.params.id);
+  if (!record) return res.status(404).json({ error: "Record not found" });
+  record.appraised_value = appraised_value;
+  setAppraisal(req.params.id, appraised_value);
+  res.json(record);
+}));
+
+// DELETE /api/v1/collateral/:id — soft delete
+app.delete("/api/v1/collateral/:id", (req: Request, res: Response) => {
   const ok = softDeleteCollateral(req.params.id);
   if (!ok) return res.status(404).json({ error: "Record not found" });
   res.json({ deleted: true, id: req.params.id });
@@ -476,6 +699,59 @@ app.delete("/api/loan/:id", (req: Request, res: Response) => {
   res.json({ deleted: true, id: req.params.id });
 });
 
+// GET /api/transactions — transaction history with filtering, sorting, and pagination
+app.get(
+  "/api/transactions",
+  asyncHandler(async (req: Request, res: Response) => {
+    const borrower = req.query.borrower as string | undefined;
+    const type = req.query.type as TransactionType | undefined;
+    const status = req.query.status as TransactionStatus | undefined;
+    const startDate = req.query.startDate as string | undefined;
+    const endDate = req.query.endDate as string | undefined;
+    const pageRaw = req.query.page !== undefined ? Number(req.query.page) : 1;
+    const pageSizeRaw = req.query.pageSize !== undefined ? Number(req.query.pageSize) : 20;
+
+    if (!Number.isInteger(pageRaw) || pageRaw < 1) {
+      return res.status(400).json({ error: "page must be a positive integer" });
+    }
+    if (!Number.isInteger(pageSizeRaw) || pageSizeRaw < 1 || pageSizeRaw > 100) {
+      return res.status(400).json({ error: "pageSize must be between 1 and 100" });
+    }
+
+    // Validate date range if provided
+    if (startDate && isNaN(new Date(startDate).getTime())) {
+      return res.status(400).json({ error: "startDate must be a valid ISO date" });
+    }
+    if (endDate && isNaN(new Date(endDate).getTime())) {
+      return res.status(400).json({ error: "endDate must be a valid ISO date" });
+    }
+
+    const result = listTransactions({
+      borrower,
+      type,
+      status,
+      startDate,
+      endDate,
+      page: pageRaw,
+      pageSize: pageSizeRaw,
+    });
+
+    res.json(result);
+  }),
+);
+
+// GET /api/transactions/:id — get transaction details
+app.get(
+  "/api/transactions/:id",
+  asyncHandler(async (req: Request, res: Response) => {
+    const transaction = getTransaction(req.params.id);
+    if (!transaction) {
+      return res.status(404).json({ error: "Transaction not found" });
+    }
+    res.json(transaction);
+  }),
+);
+
 // ── error handler ─────────────────────────────────────────────────────────────
 app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
   const reqLogger = (req as any).logger || logger;
@@ -488,6 +764,7 @@ app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
     error: err.message,
     stack: err.stack,
   });
+  track5xx();
   res.status(500).json({ error: err.message });
 });
 
@@ -501,5 +778,98 @@ if (process.env.NODE_ENV !== "test") {
     });
   });
 }
+
+// ── Graceful Shutdown ─────────────────────────────────────────────────────────
+
+const SHUTDOWN_TIMEOUT_MS = 30000; // 30 seconds
+
+async function gracefulShutdown(signal: string): Promise<void> {
+  if (isShuttingDown) {
+    logger.warn("Shutdown already in progress, ignoring signal", { signal });
+    return;
+  }
+
+  isShuttingDown = true;
+  logger.info(`Received ${signal}, starting graceful shutdown...`, { signal });
+
+  // Stop accepting new connections
+  httpServer.close(() => {
+    logger.info("HTTP server closed, no longer accepting connections");
+  });
+
+  // Set a timeout to force shutdown if graceful shutdown takes too long
+  const forceShutdownTimer = setTimeout(() => {
+    logger.error("Graceful shutdown timeout exceeded, forcing exit", {
+      timeoutMs: SHUTDOWN_TIMEOUT_MS,
+    });
+    process.exit(1);
+  }, SHUTDOWN_TIMEOUT_MS);
+
+  try {
+    // Wait for in-flight requests to complete
+    await new Promise<void>((resolve) => {
+      const checkInterval = setInterval(() => {
+        const stats = pool.stats();
+        if (stats.inUse === 0) {
+          clearInterval(checkInterval);
+          resolve();
+        } else {
+          logger.info("Waiting for in-flight requests to complete", {
+            inUse: stats.inUse,
+          });
+        }
+      }, 1000);
+    });
+
+    logger.info("All in-flight requests completed");
+
+    // Close database connections
+    pool.close();
+    logger.info("Database connection pool closed");
+
+    clearTimeout(forceShutdownTimer);
+    logger.info("Graceful shutdown complete");
+    process.exit(0);
+  } catch (error) {
+    logger.error("Error during graceful shutdown", {
+      error: (error as Error).message,
+    });
+    clearTimeout(forceShutdownTimer);
+    process.exit(1);
+  }
+}
+
+// Register signal handlers
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+
+// Handle uncaught errors
+process.on("uncaughtException", (error: Error) => {
+  logger.error("Uncaught exception", {
+    error: error.message,
+    stack: error.stack,
+  });
+  gracefulShutdown("uncaughtException");
+});
+
+process.on("unhandledRejection", (reason: unknown) => {
+  logger.error("Unhandled promise rejection", {
+    reason: reason instanceof Error ? reason.message : String(reason),
+  });
+  gracefulShutdown("unhandledRejection");
+});
+
+// Redirect unversioned routes to v1 with deprecation warning
+app.use("/api", (req: Request, res: Response, next: NextFunction) => {
+  // Skip if already versioned or is auth/health
+  if (req.path.startsWith("/api/v1") || req.path === "/api/health" || req.path.startsWith("/api/auth")) {
+    return next();
+  }
+
+  const newPath = req.path.replace(/^\/api/, "/api/v1");
+  res.setHeader("Deprecation", "true");
+  res.setHeader("Warning", '299 - "Unversioned API routes are deprecated. Use /api/v1/ prefix."');
+  res.redirect(301, newPath + (req.url.includes("?") ? req.url.substring(req.url.indexOf("?")) : ""));
+});
 
 export default app;

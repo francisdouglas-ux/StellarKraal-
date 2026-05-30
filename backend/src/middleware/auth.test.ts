@@ -1,9 +1,11 @@
 import { Keypair } from "@stellar/stellar-sdk";
+import { createHmac } from "crypto";
 import request from "supertest";
 import app from "../index";
+import { jwtMiddleware } from "./auth";
 
 // Suppress logger noise
-jest.mock("./utils/logger", () => ({
+jest.mock("../utils/logger", () => ({
   __esModule: true,
   default: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() },
   createRequestLogger: jest.fn(() => ({
@@ -58,10 +60,29 @@ async function login(kp: Keypair): Promise<{ accessToken: string; refreshToken: 
   return res.body;
 }
 
+// Minimal helpers to craft JWTs for test cases (mirror auth.ts implementation)
+const DEFAULT_TEST_JWT_SECRET = "change-me-in-production-min-32-chars!!";
+function b64url(buf: Buffer | string): string {
+  const s = typeof buf === "string" ? Buffer.from(buf) : buf;
+  return s.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+}
+
+function makeToken(payload: object, secret = DEFAULT_TEST_JWT_SECRET): string {
+  const header = b64url(JSON.stringify({ alg: "HS256", typ: "JWT" }));
+  const body = b64url(JSON.stringify(payload));
+  const sig = b64url(createHmac("sha256", secret).update(`${header}.${body}`).digest());
+  return `${header}.${body}.${sig}`;
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe("JWT Authentication", () => {
   const kp = Keypair.random();
+
+  // Test-only route to inspect req.user set by jwtMiddleware
+  app.post("/__test/user", jwtMiddleware, (req, res) => {
+    res.json({ user: (req as any).user ?? null });
+  });
 
   describe("GET /api/auth/challenge", () => {
     it("returns a hex challenge string", async () => {
@@ -168,7 +189,7 @@ describe("JWT Authentication", () => {
         .post("/api/collateral/register")
         .set("Authorization", `Bearer ${accessToken}`)
         .send({
-          owner: "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN",
+          owner: kp.publicKey(),
           animal_type: "cattle",
           count: 5,
           appraised_value: 1_000_000,
@@ -189,6 +210,51 @@ describe("JWT Authentication", () => {
     it("GET routes are not protected", async () => {
       const res = await request(app).get("/api/health");
       expect(res.status).toBe(200);
+    });
+
+    it("attaches payload to req.user for valid token", async () => {
+      const { accessToken } = await login(kp);
+      const res = await request(app)
+        .post("/__test/user")
+        .set("Authorization", `Bearer ${accessToken}`)
+        .send({});
+      expect(res.status).toBe(200);
+      expect(res.body.user).toEqual({ publicKey: kp.publicKey() });
+    });
+
+    it("expired token returns 401 with Token expired", async () => {
+      const token = makeToken({ sub: kp.publicKey(), exp: Date.now() - 1000, iat: Date.now() - 2000 });
+      const res = await request(app)
+        .post("/api/collateral/register")
+        .set("Authorization", `Bearer ${token}`)
+        .send({ owner: kp.publicKey(), animal_type: "cattle", count: 1, appraised_value: 1000 });
+      expect(res.status).toBe(401);
+      expect(res.body.error).toBe("Token expired");
+    });
+
+    it("malformed token returns 401", async () => {
+      const res = await request(app)
+        .post("/api/collateral/register")
+        .set("Authorization", `Bearer not.a.valid.token`)
+        .send({});
+      expect(res.status).toBe(401);
+      expect(res.body.error).toBe("Invalid token");
+    });
+
+    it("missing Authorization header returns 401 and message", async () => {
+      const res = await request(app).post("/api/collateral/register").send({});
+      expect(res.status).toBe(401);
+      expect(res.body.error).toBe("Authorization header required");
+    });
+
+    it("token signed with wrong secret returns 401", async () => {
+      const token = makeToken({ sub: kp.publicKey(), exp: Date.now() + 10000, iat: Date.now() }, "wrong-secret");
+      const res = await request(app)
+        .post("/api/collateral/register")
+        .set("Authorization", `Bearer ${token}`)
+        .send({ owner: kp.publicKey(), animal_type: "cattle", count: 1, appraised_value: 1000 });
+      expect(res.status).toBe(401);
+      expect(res.body.error).toBe("Invalid token");
     });
   });
 });
