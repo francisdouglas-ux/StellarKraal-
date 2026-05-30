@@ -11,7 +11,6 @@ import {
   restoreCollateral,
   listDeletedCollateral,
   getLoan,
-  insertLoan,
   softDeleteLoan,
   restoreLoan,
   listDeletedLoans,
@@ -25,8 +24,6 @@ import {
 import { corsMiddleware } from "./middleware/cors";
 import { correlationMiddleware } from "./middleware/correlation";
 import { loggingMiddleware } from "./middleware/logging";
-import {
-  Networks,
 import {
   Networks,
   TransactionBuilder,
@@ -57,6 +54,9 @@ import rpcClient from "./utils/rpcClient";
 import { registerWebhook, getWebhooks, getDeliveryLogs, fireWebhooks } from "./webhooks";
 import { fireAlert } from "./utils/alerting";
 import { rules } from "./utils/alertRules";
+import multer from "multer";
+import path from "path";
+import { mkdirSync } from "fs";
 import {
   registry,
   httpRequestsTotal,
@@ -114,6 +114,7 @@ app.use(globalLimiter);
 app.use(timeoutMiddleware(parseInt(config.TIMEOUT_GLOBAL_MS, 10)));
 app.use(correlationMiddleware);
 app.use(loggingMiddleware);
+app.use("/uploads", express.static(path.join(__dirname, "..", "uploads")));
 
 // Request ID middleware
 app.use((req: Request, res: Response, next: NextFunction) => {
@@ -784,6 +785,81 @@ app.delete("/api/collateral/:id", (req: Request, res: Response) => {
   if (!ok) return res.status(404).json({ error: "Record not found" });
   res.json({ deleted: true, id: req.params.id });
 });
+
+// ── POST /api/collateral — animal registration with image upload ──────────────
+
+const uploadsDir = path.join(__dirname, "..", "uploads");
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, uploadsDir),
+    filename: (_req, file, cb) => cb(null, `${randomUUID()}${path.extname(file.originalname)}`),
+  }),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
+  fileFilter: (_req, file, cb) => {
+    if (file.mimetype.startsWith("image/")) cb(null, true);
+    else cb(new Error("Only image files are allowed"));
+  },
+});
+
+// Ensure uploads directory exists
+mkdirSync(uploadsDir, { recursive: true });
+
+app.post(
+  "/api/collateral",
+  timeoutMiddleware(parseInt(config.TIMEOUT_WRITE_MS, 10)),
+  writeLimiter,
+  upload.single("image"),
+  asyncHandler(async (req: Request, res: Response) => {
+    const { species, breed, age, weight } = req.body as {
+      species?: string;
+      breed?: string;
+      age?: string;
+      weight?: string;
+    };
+
+    if (!species || typeof species !== "string" || species.trim() === "") {
+      return res.status(400).json({ error: "species is required" });
+    }
+    if (!breed || typeof breed !== "string" || breed.trim() === "") {
+      return res.status(400).json({ error: "breed is required" });
+    }
+    const ageNum = Number(age);
+    if (!age || !Number.isFinite(ageNum) || ageNum < 0) {
+      return res.status(400).json({ error: "age must be a non-negative number" });
+    }
+    const weightNum = Number(weight);
+    if (!weight || !Number.isFinite(weightNum) || weightNum <= 0) {
+      return res.status(400).json({ error: "weight must be a positive number" });
+    }
+    if (!req.file) {
+      return res.status(400).json({ error: "image file is required" });
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const owner = (req as any).user?.publicKey as string | undefined;
+    if (!owner) {
+      return res.status(401).json({ error: "Authenticated wallet address required" });
+    }
+
+    const imageUrl = `/uploads/${req.file.filename}`;
+    const appraised_value = Math.round(weightNum * 100); // simple appraisal: 100 per kg
+
+    const record = insertCollateral({
+      id: randomUUID(),
+      owner,
+      animal_type: species.trim(),
+      count: 1,
+      appraised_value,
+      species: species.trim(),
+      breed: breed.trim(),
+      age: ageNum,
+      weight: weightNum,
+      image_url: imageUrl,
+    });
+
+    res.status(201).json(record);
+  }),
+);
 
 // ── v1 collateral CRUD ────────────────────────────────────────────────────────
 

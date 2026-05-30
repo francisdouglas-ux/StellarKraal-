@@ -13,6 +13,11 @@ export interface CollateralRecord {
   animal_type: string;
   count: number;
   appraised_value: number;
+  species?: string;
+  breed?: string;
+  age?: number;
+  weight?: number;
+  image_url?: string;
   createdAt: string;
   deletedAt: string | null;
 }
