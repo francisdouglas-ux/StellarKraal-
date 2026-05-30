@@ -60,6 +60,7 @@ import {
   httpRequestDurationSeconds,
   httpActiveConnections,
 } from "./metrics";
+import { startHealthFactorJob, stopHealthFactorJob } from "./jobs/healthFactorJob";
 
 // ── 5xx spike tracking (rolling 60s window) ───────────────────────────────────
 const fivexxTimestamps: number[] = [];
@@ -925,6 +926,7 @@ const httpServer = app.listen(PORT, () => {
     environment: process.env.NODE_ENV || "development",
     logLevel: process.env.LOG_LEVEL || "info",
   });
+  startHealthFactorJob();
 });
 
 // ── Graceful Shutdown ─────────────────────────────────────────────────────────
@@ -974,6 +976,8 @@ async function gracefulShutdown(signal: string): Promise<void> {
     // Close database connections
     pool.close();
     logger.info("Database connection pool closed");
+
+    stopHealthFactorJob();
 
     clearTimeout(forceShutdownTimer);
     logger.info("Graceful shutdown complete");

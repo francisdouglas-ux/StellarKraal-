@@ -22,6 +22,8 @@ export interface LoanRecord {
   borrower: string;
   collateral_id: string;
   amount: number;
+  status: "pending" | "active" | "repaid" | "liquidated" | "at_risk";
+  health_factor: number | null;
   createdAt: string;
   deletedAt: string | null;
 }
@@ -121,9 +123,32 @@ export function listDeletedCollateral(): CollateralRecord[] {
  * const loan = insertLoan({ id: "1", borrower: "G...", collateral_id: "1", amount: 600000 });
  */
 export function insertLoan(data: Omit<LoanRecord, "createdAt" | "deletedAt">): LoanRecord {
-  const record: LoanRecord = { ...data, createdAt: new Date().toISOString(), deletedAt: null };
+  const record: LoanRecord = {
+    status: "pending",
+    health_factor: null,
+    ...data,
+    createdAt: new Date().toISOString(),
+    deletedAt: null,
+  };
   loanTable.set(record.id, record);
   return record;
+}
+
+/**
+ * Update mutable fields on an existing loan record.
+ * @param id - Loan record ID.
+ * @param updates - Partial fields to merge (excluding `id`, `createdAt`, `deletedAt`).
+ * @returns The updated {@link LoanRecord}, or `undefined` if not found.
+ */
+export function updateLoan(
+  id: string,
+  updates: Partial<Omit<LoanRecord, "id" | "createdAt" | "deletedAt">>
+): LoanRecord | undefined {
+  const record = loanTable.get(id);
+  if (!record) return undefined;
+  const updated = { ...record, ...updates };
+  loanTable.set(id, updated);
+  return updated;
 }
 
 /**

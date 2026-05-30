@@ -84,8 +84,8 @@ describe("LoanStateMachine", () => {
     expect(allowedTransitions("pending")).toEqual(["active"]);
   });
 
-  it("allowedTransitions(active) = [repaid, liquidated]", () => {
-    expect(allowedTransitions("active")).toEqual(["repaid", "liquidated"]);
+  it("allowedTransitions(active) = [repaid, liquidated, at_risk]", () => {
+    expect(allowedTransitions("active")).toEqual(["repaid", "liquidated", "at_risk"]);
   });
 
   // ── InvalidTransitionError identity ───────────────────────────────────

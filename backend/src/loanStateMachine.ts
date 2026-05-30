@@ -1,4 +1,4 @@
-export type LoanStatus = "pending" | "active" | "repaid" | "liquidated";
+export type LoanStatus = "pending" | "active" | "repaid" | "liquidated" | "at_risk";
 
 export interface TransitionRecord {
   from: LoanStatus;
@@ -16,7 +16,8 @@ export class InvalidTransitionError extends Error {
 // Valid transitions: from → allowed next states
 const TRANSITIONS: Record<LoanStatus, LoanStatus[]> = {
   pending: ["active"],
-  active: ["repaid", "liquidated"],
+  active: ["repaid", "liquidated", "at_risk"],
+  at_risk: ["repaid", "liquidated", "active"],
   repaid: [],
   liquidated: [],
 };
