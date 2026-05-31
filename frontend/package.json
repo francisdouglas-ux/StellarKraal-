@@ -18,12 +18,14 @@
     "format:check": "prettier --check src"
   },
   "dependencies": {
+    "@reduxjs/toolkit": "^2.0.1",
     "@stellar/freighter-api": "^6.0.1",
     "@stellar/stellar-sdk": "^15.1.0",
     "framer-motion": "^12.40.0",
     "next": "14.2.35",
     "react": "^19.2.6",
-    "react-dom": "^19.2.6"
+    "react-dom": "^19.2.6",
+    "react-redux": "^9.1.1"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.8.5",
