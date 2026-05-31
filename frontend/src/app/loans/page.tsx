@@ -40,15 +40,17 @@ function LoanListContent() {
 
   const q = (searchParams.get('q') ?? '').toLowerCase();
   const statuses = searchParams.getAll('status');
+  const dateFrom = searchParams.get('dateFrom') ?? '';
+  const dateTo = searchParams.get('dateTo') ?? '';
 
   const filtered = loans.filter((loan) => {
     const matchesQuery =
-      !q ||
-      loan.id.toLowerCase().includes(q) ||
-      loan.borrower.toLowerCase().includes(q) ||
-      loan.status.toLowerCase().includes(q);
+      !q || loan.borrower.toLowerCase().includes(q) || loan.id.toLowerCase().includes(q);
     const matchesStatus = statuses.length === 0 || statuses.includes(loan.status);
-    return matchesQuery && matchesStatus;
+    const loanDate = loan.createdAt.slice(0, 10);
+    const matchesDateFrom = !dateFrom || loanDate >= dateFrom;
+    const matchesDateTo = !dateTo || loanDate <= dateTo;
+    return matchesQuery && matchesStatus && matchesDateFrom && matchesDateTo;
   });
 
   const { page, limit, totalPages, setPage, setLimit, slice } = usePagination(filtered.length);
@@ -59,7 +61,7 @@ function LoanListContent() {
       <SearchFilterBar
         statusOptions={STATUS_OPTIONS}
         typeOptions={TYPE_OPTIONS}
-        searchPlaceholder="Search by loan ID, borrower, or status…"
+        searchPlaceholder="Search by borrower address…"
       />
 
       {loading ? (

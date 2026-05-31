@@ -1,14 +1,16 @@
-"use client";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useRouter, useSearchParams, usePathname } from "next/navigation";
+'use client';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 
 export interface FilterState {
   query: string;
   statuses: string[];
   types: string[];
+  dateFrom: string;
+  dateTo: string;
 }
 
-const EMPTY: FilterState = { query: "", statuses: [], types: [] };
+const EMPTY: FilterState = { query: '', statuses: [], types: [], dateFrom: '', dateTo: '' };
 
 /**
  * Hook that manages search/filter state with 300ms debounce and URL sync.
@@ -21,9 +23,11 @@ export function useSearchFilter(debounceMs = 300) {
 
   // Initialise from URL
   const [filters, setFilters] = useState<FilterState>(() => ({
-    query: searchParams.get("q") ?? "",
-    statuses: searchParams.getAll("status"),
-    types: searchParams.getAll("type"),
+    query: searchParams.get('q') ?? '',
+    statuses: searchParams.getAll('status'),
+    types: searchParams.getAll('type'),
+    dateFrom: searchParams.get('dateFrom') ?? '',
+    dateTo: searchParams.get('dateTo') ?? '',
   }));
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -33,11 +37,13 @@ export function useSearchFilter(debounceMs = 300) {
     (next: FilterState, immediate = false) => {
       const apply = () => {
         const params = new URLSearchParams();
-        if (next.query) params.set("q", next.query);
-        next.statuses.forEach((s) => params.append("status", s));
-        next.types.forEach((t) => params.append("type", t));
+        if (next.query) params.set('q', next.query);
+        next.statuses.forEach((s) => params.append('status', s));
+        next.types.forEach((t) => params.append('type', t));
+        if (next.dateFrom) params.set('dateFrom', next.dateFrom);
+        if (next.dateTo) params.set('dateTo', next.dateTo);
         const qs = params.toString();
-        router.replace(`${pathname}${qs ? `?${qs}` : ""}`, { scroll: false });
+        router.replace(`${pathname}${qs ? `?${qs}` : ''}`, { scroll: false });
       };
 
       if (immediate) {
@@ -84,15 +90,27 @@ export function useSearchFilter(debounceMs = 300) {
     [filters, syncUrl]
   );
 
-  const removeStatus = useCallback(
-    (status: string) => toggleStatus(status),
-    [toggleStatus]
+  const setDateFrom = useCallback(
+    (dateFrom: string) => {
+      const next = { ...filters, dateFrom };
+      setFilters(next);
+      syncUrl(next, true);
+    },
+    [filters, syncUrl]
   );
 
-  const removeType = useCallback(
-    (type: string) => toggleType(type),
-    [toggleType]
+  const setDateTo = useCallback(
+    (dateTo: string) => {
+      const next = { ...filters, dateTo };
+      setFilters(next);
+      syncUrl(next, true);
+    },
+    [filters, syncUrl]
   );
+
+  const removeStatus = useCallback((status: string) => toggleStatus(status), [toggleStatus]);
+
+  const removeType = useCallback((type: string) => toggleType(type), [toggleType]);
 
   const clearAll = useCallback(() => {
     setFilters(EMPTY);
@@ -100,16 +118,27 @@ export function useSearchFilter(debounceMs = 300) {
   }, [syncUrl]);
 
   // Cleanup debounce on unmount
-  useEffect(() => () => { if (debounceRef.current) clearTimeout(debounceRef.current); }, []);
+  useEffect(
+    () => () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    },
+    []
+  );
 
   const hasActiveFilters =
-    filters.query !== "" || filters.statuses.length > 0 || filters.types.length > 0;
+    filters.query !== '' ||
+    filters.statuses.length > 0 ||
+    filters.types.length > 0 ||
+    filters.dateFrom !== '' ||
+    filters.dateTo !== '';
 
   return {
     filters,
     setQuery,
     toggleStatus,
     toggleType,
+    setDateFrom,
+    setDateTo,
     removeStatus,
     removeType,
     clearAll,
