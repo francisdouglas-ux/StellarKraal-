@@ -1,32 +1,37 @@
 "use client";
 import { useState } from "react";
-import { signTransaction } from "@stellar/freighter-api";
+import { signTransaction } from "@/lib/freighterClient";
 import { submitSignedXdr } from "@/lib/stellarUtils";
+import { colors } from "@/lib/design-tokens";
+import Spinner from "@/components/Spinner";
 
 interface Props {
   walletAddress: string;
+  initialCollateralId?: string;
 }
 
-const ANIMAL_TYPES = ["cattle", "goat", "sheep"];
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+const ANIMAL_TYPES = ['cattle', 'goat', 'sheep'];
+const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
-export default function LoanForm({ walletAddress }: Props) {
-  const [step, setStep] = useState<"collateral" | "loan">("collateral");
-  const [animalType, setAnimalType] = useState("cattle");
-  const [count, setCount] = useState("");
-  const [appraisedValue, setAppraisedValue] = useState("");
-  const [collateralId, setCollateralId] = useState("");
-  const [loanAmount, setLoanAmount] = useState("");
-  const [status, setStatus] = useState<string | null>(null);
+export default function LoanForm({ walletAddress, initialCollateralId }: Props) {
+  const [step, setStep] = useState<'collateral' | 'loan'>(
+    initialCollateralId ? 'loan' : 'collateral'
+  );
+  const [animalType, setAnimalType] = useState('cattle');
+  const [count, setCount] = useState('');
+  const [appraisedValue, setAppraisedValue] = useState('');
+  const [collateralId, setCollateralId] = useState(initialCollateralId || '');
+  const [loanAmount, setLoanAmount] = useState('');
   const [loading, setLoading] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
 
   async function registerCollateral() {
     setLoading(true);
     setStatus(null);
     try {
       const res = await fetch(`${API}/api/collateral/register`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           owner: walletAddress,
           animal_type: animalType,
@@ -34,8 +39,14 @@ export default function LoanForm({ walletAddress }: Props) {
           appraised_value: parseInt(appraisedValue),
         }),
       });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Registration failed");
+      }
       const { xdr } = await res.json();
-      const { signedTxXdr } = await signTransaction(xdr, { network: process.env.NEXT_PUBLIC_NETWORK || "TESTNET" });
+      const { signedTxXdr } = await signTransaction(xdr, {
+        network: process.env.NEXT_PUBLIC_NETWORK || "TESTNET",
+      });
       const result = await submitSignedXdr(signedTxXdr);
       setStatus(`✅ Collateral registered! ID: ${result}`);
       setStep("loan");
@@ -51,16 +62,22 @@ export default function LoanForm({ walletAddress }: Props) {
     setStatus(null);
     try {
       const res = await fetch(`${API}/api/loan/request`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           borrower: walletAddress,
           collateral_id: parseInt(collateralId),
           amount: parseInt(loanAmount),
         }),
       });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Loan request failed");
+      }
       const { xdr } = await res.json();
-      const { signedTxXdr } = await signTransaction(xdr, { network: process.env.NEXT_PUBLIC_NETWORK || "TESTNET" });
+      const { signedTxXdr } = await signTransaction(xdr, {
+        network: process.env.NEXT_PUBLIC_NETWORK || "TESTNET",
+      });
       const result = await submitSignedXdr(signedTxXdr);
       setStatus(`✅ Loan disbursed! Loan ID: ${result}`);
     } catch (e: any) {
@@ -74,31 +91,86 @@ export default function LoanForm({ walletAddress }: Props) {
     <div className="bg-white rounded-2xl p-6 shadow mt-6 space-y-4">
       {step === "collateral" ? (
         <>
-          <h2 className="text-xl font-semibold text-brown">1. Register Collateral</h2>
-          <select
-            className="w-full border border-brown/30 rounded-lg px-3 py-2"
+          <h2 className="text-xl font-semibold text-brown-700">1. Register Collateral</h2>
+          <Select
+            label="Animal Type"
             value={animalType}
             onChange={(e) => setAnimalType(e.target.value)}
+            disabled={loading}
           >
             {ANIMAL_TYPES.map((a) => <option key={a}>{a}</option>)}
-          </select>
-          <input className="w-full border border-brown/30 rounded-lg px-3 py-2" placeholder="Count" value={count} onChange={(e) => setCount(e.target.value)} type="number" />
-          <input className="w-full border border-brown/30 rounded-lg px-3 py-2" placeholder="Appraised value (stroops)" value={appraisedValue} onChange={(e) => setAppraisedValue(e.target.value)} type="number" />
-          <button onClick={registerCollateral} disabled={loading} className="w-full bg-brown text-cream py-2.5 rounded-xl font-semibold hover:bg-brown/80 transition disabled:opacity-50">
-            {loading ? "Processing…" : "Register & Continue"}
+          </Select>
+          <Input
+            label="Count"
+            type="number"
+            placeholder="Number of animals"
+            value={count}
+            onChange={(e) => setCount(e.target.value)}
+            disabled={loading}
+          />
+          <Input
+            label="Appraised Value (stroops)"
+            type="number"
+            placeholder="Total appraised value"
+            value={appraisedValue}
+            onChange={(e) => setAppraisedValue(e.target.value)}
+            disabled={loading}
+          />
+          <button
+            onClick={registerCollateral}
+            disabled={loading}
+            className={`w-full ${colors.primary.bg} ${colors.primary.text} py-2.5 rounded-xl font-semibold ${colors.primary.hover} transition ${colors.interactive.disabled} ${colors.interactive.focus} flex items-center justify-center gap-2`}
+          >
+            {loading ? (
+              <>
+                <Spinner />
+                Processing…
+              </>
+            ) : (
+              "Register & Continue"
+            )}
           </button>
         </>
       ) : (
         <>
-          <h2 className="text-xl font-semibold text-brown">2. Request Loan</h2>
-          <input className="w-full border border-brown/30 rounded-lg px-3 py-2" placeholder="Collateral ID" value={collateralId} onChange={(e) => setCollateralId(e.target.value)} type="number" />
-          <input className="w-full border border-brown/30 rounded-lg px-3 py-2" placeholder="Loan amount (stroops)" value={loanAmount} onChange={(e) => setLoanAmount(e.target.value)} type="number" />
-          <button onClick={requestLoan} disabled={loading} className="w-full bg-gold text-brown py-2.5 rounded-xl font-semibold hover:bg-gold/80 transition disabled:opacity-50">
-            {loading ? "Processing…" : "Request Loan"}
+          <h2 className="text-xl font-semibold text-brown-700">2. Request Loan</h2>
+          <Input
+            label="Collateral ID"
+            type="number"
+            placeholder="Your collateral ID"
+            value={collateralId}
+            onChange={(e) => setCollateralId(e.target.value)}
+            disabled={loading}
+          />
+          <Input
+            label="Loan Amount (stroops)"
+            type="number"
+            placeholder="Amount to borrow"
+            value={loanAmount}
+            onChange={(e) => setLoanAmount(e.target.value)}
+            disabled={loading}
+          />
+          <button
+            onClick={requestLoan}
+            disabled={loading}
+            className={`w-full ${colors.secondary.bg} ${colors.secondary.text} py-2.5 rounded-xl font-semibold ${colors.secondary.hover} transition ${colors.interactive.disabled} ${colors.interactive.focus} flex items-center justify-center gap-2`}
+          >
+            {loading ? (
+              <>
+                <Spinner />
+                Processing…
+              </>
+            ) : (
+              "Request Loan"
+            )}
           </button>
         </>
       )}
-      {status && <p className="text-sm mt-2">{status}</p>}
+      {status && (
+        <p className={`text-sm mt-2 ${status.includes("❌") ? colors.status.error.text : colors.status.success.text}`}>
+          {status}
+        </p>
+      )}
     </div>
   );
 }

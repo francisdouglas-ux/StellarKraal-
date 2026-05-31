@@ -56,14 +56,10 @@ coverage/
 .nyc_output/
 *.lcov
 
-# Performance test results (stored as CI artifacts)
-backend/performance-results/
-
-# OS files
-Thumbs.db
-.DS_Store
-
-# Temporary files
-*.tmp
-*.temp
-.cache/
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.backup
+.terraform.lock.hcl
+*.tfvars
+*.tfvars.json
