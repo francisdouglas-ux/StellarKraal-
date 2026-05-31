@@ -60,13 +60,13 @@ describe("Toast notification system", () => {
     expect(alerts).toHaveLength(2);
   });
 
-  it("auto-dismisses after 5 seconds", async () => {
+  it("auto-dismisses after 4 seconds", async () => {
     renderWithProvider(<TestComponent />);
     fireEvent.click(screen.getByText("Trigger Success"));
     expect(screen.getByRole("alert")).toBeInTheDocument();
 
     act(() => {
-      jest.advanceTimersByTime(5000);
+      jest.advanceTimersByTime(4000);
     });
 
     await waitFor(() => {
@@ -74,12 +74,19 @@ describe("Toast notification system", () => {
     });
   });
 
-  it("allows manual close via close button", () => {
+  it("allows manual close via close button", async () => {
     renderWithProvider(<TestComponent />);
     fireEvent.click(screen.getByText("Trigger Success"));
     const closeButton = screen.getByLabelText("Close notification");
     fireEvent.click(closeButton);
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+    act(() => {
+      jest.advanceTimersByTime(300);
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
   });
 
   it("has ARIA live region on the container", () => {

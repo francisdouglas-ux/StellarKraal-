@@ -73,6 +73,20 @@ export async function getMigrationStatus(): Promise<string> {
 }
 
 /**
+ * Check database connectivity by running a trivial query against the SQLite file.
+ * Returns true if the DB is reachable, false otherwise.
+ */
+export async function checkDbHealth(): Promise<boolean> {
+  try {
+    const dbFile = process.env.DB_FILE ?? path.join(__dirname, "../../dev.sqlite3");
+    await execAsync(`sqlite3 "${dbFile}" "SELECT 1;"`, { timeout: 3000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Rollback the last migration
  * Use with caution - only for development or emergency rollbacks
  */

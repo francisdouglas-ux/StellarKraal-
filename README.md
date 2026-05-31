@@ -129,10 +129,23 @@ docker compose -f docker-compose.yml -f docker-compose.staging.yml up -d
 
 ## Troubleshooting
 
-- `PORT already in use`: stop the process using the port or change `PORT` in `.env`.
-- `Cannot connect to RPC_URL`: verify network and RPC endpoint reachability.
-- `npm test` failures: ensure dependencies are installed and the correct Node.js version is active.
-- `Docker build` errors: rebuild after clearing caches with `docker-compose build --no-cache`.
+Common errors and their resolutions are documented in **[docs/troubleshooting.md](docs/troubleshooting.md)**, covering:
+
+- **Setup** — dependency conflicts, missing CLI tools, build failures, SQLite addon errors
+- **Runtime** — port conflicts, RPC connectivity, CORS, JWT errors, Docker health checks
+- **Contract** — invocation errors, sequence number mismatches, missing contract deployments
+- **Database** — SQLite open failures, migration conflicts
+
+Quick reference for the most frequent issues:
+
+| Symptom | Resolution |
+|---|---|
+| `PORT already in use` | Stop the process on that port or change `PORT` in `.env` |
+| `Cannot connect to RPC_URL` | Verify network and RPC endpoint reachability |
+| `npm test` failures | Ensure dependencies are installed and Node.js 20+ is active |
+| `Docker build` errors | Rebuild with `docker-compose build --no-cache` |
+
+For anything not listed here, see the [full troubleshooting guide](docs/troubleshooting.md).
 
 ## Contribution Guidelines
 
@@ -174,6 +187,7 @@ npm run test:frontend
 | Document | Description |
 |---|---|
 | [Liquidation Mechanism](docs/protocol/liquidation.md) | Health factor formula, liquidation threshold, partial liquidation examples |
+| [Smart Contract Interface](docs/contracts/stellarkraal-interface.md) | Soroban contract public API, error codes, state changes, and CLI invocation guide |
 
 ## Architecture Decision Records
 
@@ -185,6 +199,7 @@ Key design decisions are documented as ADRs in [`docs/adr/`](docs/adr/).
 | [ADR-002](docs/adr/ADR-002-jwt-auth.md) | JWT-Based Authentication Strategy | Accepted |
 | [ADR-003](docs/adr/ADR-003-sqlite.md) | SQLite as the Off-Chain Database | Accepted |
 | [ADR-004](docs/adr/ADR-004-nextjs-tailwind.md) | Next.js 14 + Tailwind CSS for the Frontend | Accepted |
+| [ADR-005](docs/adr/ADR-005-collateral-appraisal-model.md) | Off-chain collateral appraisal model | Accepted |
 
 To add a new ADR, copy [`docs/adr/template.md`](docs/adr/template.md), increment the number, fill in all sections, and add a row to the table above.
 

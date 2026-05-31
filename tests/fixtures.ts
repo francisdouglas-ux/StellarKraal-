@@ -27,8 +27,7 @@ export interface LoanRecord {
   borrower: string;
   collateral_id: string;
   amount: number;
-  status: LoanStatus;
-  health_factor: number | null;
+  status: "active" | "repaid" | "liquidated";
   createdAt: string;
   deletedAt: string | null;
 }
@@ -72,7 +71,6 @@ export function makeLoan(overrides: Partial<LoanRecord> = {}): LoanRecord {
     collateral_id: "col-001",
     amount: 6_000_000,
     status: "active",
-    health_factor: null,
     createdAt: "2026-01-01T00:00:00.000Z",
     deletedAt: null,
     ...overrides,

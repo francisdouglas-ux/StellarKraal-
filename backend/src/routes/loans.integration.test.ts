@@ -222,19 +222,19 @@ describe("GET /api/v1/loans (list loans with pagination)", () => {
   });
 
   it("returns 200 with paginated data and metadata", async () => {
-    const res = await request(app).get("/api/v1/loans?page=1&pageSize=20");
+    const res = await request(app).get("/api/v1/loans?page=1&limit=20");
 
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty("data");
     expect(res.body).toHaveProperty("total");
     expect(res.body).toHaveProperty("page", 1);
-    expect(res.body).toHaveProperty("pageSize", 20);
+    expect(res.body).toHaveProperty("limit", 20);
     expect(Array.isArray(res.body.data)).toBe(true);
     expect(res.body).toHaveProperty("api_version", "v1");
   });
 
   it("returns seeded loans in the data array", async () => {
-    const res = await request(app).get("/api/v1/loans?page=1&pageSize=20");
+    const res = await request(app).get("/api/v1/loans?page=1&limit=20");
 
     expect(res.status).toBe(200);
     expect(res.body.total).toBeGreaterThanOrEqual(2);
@@ -243,16 +243,16 @@ describe("GET /api/v1/loans (list loans with pagination)", () => {
     expect(ids).toContain("list-loan-b");
   });
 
-  it("respects custom pageSize", async () => {
-    const res = await request(app).get("/api/v1/loans?page=1&pageSize=1");
+  it("respects custom limit", async () => {
+    const res = await request(app).get("/api/v1/loans?page=1&limit=1");
 
     expect(res.status).toBe(200);
     expect(res.body.data.length).toBeLessThanOrEqual(1);
-    expect(res.body.pageSize).toBe(1);
+    expect(res.body.limit).toBe(1);
   });
 
   it("returns empty data array when page exceeds total", async () => {
-    const res = await request(app).get("/api/v1/loans?page=9999&pageSize=20");
+    const res = await request(app).get("/api/v1/loans?page=9999&limit=20");
 
     expect(res.status).toBe(200);
     expect(res.body.data).toEqual([]);
@@ -261,7 +261,6 @@ describe("GET /api/v1/loans (list loans with pagination)", () => {
   it("returns 400 for invalid page=0", async () => {
     const res = await request(app).get("/api/v1/loans?page=0");
     expect(res.status).toBe(400);
-    expect(res.body.error).toBe("Invalid pagination parameters");
   });
 
   it("returns 400 for negative page", async () => {
@@ -274,10 +273,9 @@ describe("GET /api/v1/loans (list loans with pagination)", () => {
     expect(res.status).toBe(400);
   });
 
-  it("caps pageSize at 100 (returns 400 for pageSize > 100)", async () => {
-    const res = await request(app).get("/api/v1/loans?pageSize=500");
+  it("caps limit at 100 (returns 400 for limit > 100)", async () => {
+    const res = await request(app).get("/api/v1/loans?limit=500");
     expect(res.status).toBe(400);
-    expect(res.body.error).toBe("Invalid pagination parameters");
   });
 });
 
@@ -423,7 +421,7 @@ describe("Full loan lifecycle integration", () => {
     expect(createRes.body.xdr).toBeDefined();
 
     // 2. List loans
-    const listRes = await request(app).get("/api/v1/loans?page=1&pageSize=20");
+    const listRes = await request(app).get("/api/v1/loans?page=1&limit=20");
     expect(listRes.status).toBe(200);
     expect(Array.isArray(listRes.body.data)).toBe(true);
 

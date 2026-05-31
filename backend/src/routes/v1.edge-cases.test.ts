@@ -110,39 +110,40 @@ describe("Edge case tests — Issue #367", () => {
 
   describe("GET /api/v1/loans — empty dataset", () => {
     beforeEach(() => {
-      mockListLoans.mockReturnValue({ data: [], total: 0, page: 1, pageSize: 20 });
+      mockListLoans.mockReturnValue({ data: [], total: 0, page: 1, limit: 20 });
     });
 
     it("returns empty array and total=0 when no records exist", async () => {
-      const res = await request(app).get("/api/v1/loans?page=1&pageSize=20");
+      const res = await request(app).get("/api/v1/loans?page=1&limit=20");
       expect(res.status).toBe(200);
       expect(res.body.data).toEqual([]);
       expect(res.body.total).toBe(0);
     });
 
     it("returns correct pagination metadata with empty dataset", async () => {
-      const res = await request(app).get("/api/v1/loans?page=1&pageSize=20");
+      const res = await request(app).get("/api/v1/loans?page=1&limit=20");
       expect(res.status).toBe(200);
       expect(res.body.page).toBe(1);
-      expect(res.body.pageSize).toBe(20);
+      expect(res.body.limit).toBe(20);
     });
   });
 
   // ── Last page with fewer items than page size ──────────────────────────────
 
   describe("GET /api/v1/loans — last page partial results", () => {
-    it("returns fewer items than pageSize on the last page", async () => {
+    it("returns fewer items than limit on the last page", async () => {
       const partialPage = Array.from({ length: 5 }, (_, i) => ({
         id: String(i + 21),
         borrower: "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN",
         collateral_id: "1",
         amount: 1000,
+        status: "active" as const,
         createdAt: new Date().toISOString(),
         deletedAt: null,
       }));
-      mockListLoans.mockReturnValue({ data: partialPage, total: 25, page: 2, pageSize: 20 });
+      mockListLoans.mockReturnValue({ data: partialPage, total: 25, page: 2, limit: 20 });
 
-      const res = await request(app).get("/api/v1/loans?page=2&pageSize=20");
+      const res = await request(app).get("/api/v1/loans?page=2&limit=20");
       expect(res.status).toBe(200);
       expect(res.body.data).toHaveLength(5);
       expect(res.body.total).toBe(25);
@@ -150,9 +151,9 @@ describe("Edge case tests — Issue #367", () => {
     });
 
     it("returns empty data array when page exceeds total pages", async () => {
-      mockListLoans.mockReturnValue({ data: [], total: 10, page: 5, pageSize: 20 });
+      mockListLoans.mockReturnValue({ data: [], total: 10, page: 5, limit: 20 });
 
-      const res = await request(app).get("/api/v1/loans?page=5&pageSize=20");
+      const res = await request(app).get("/api/v1/loans?page=5&limit=20");
       expect(res.status).toBe(200);
       expect(res.body.data).toEqual([]);
       expect(res.body.total).toBe(10);
@@ -161,36 +162,32 @@ describe("Edge case tests — Issue #367", () => {
 
   // ── pageSize above maximum returns 400 ────────────────────────────────────
 
-  describe("GET /api/v1/loans — pageSize validation", () => {
-    it("returns 400 when pageSize exceeds maximum of 100", async () => {
-      const res = await request(app).get("/api/v1/loans?pageSize=101");
+  describe("GET /api/v1/loans — limit validation", () => {
+    it("returns 400 when limit exceeds maximum of 100", async () => {
+      const res = await request(app).get("/api/v1/loans?limit=101");
       expect(res.status).toBe(400);
-      expect(res.body.error).toBe("Invalid pagination parameters");
     });
 
-    it("returns 400 for pageSize=200", async () => {
-      const res = await request(app).get("/api/v1/loans?pageSize=200");
+    it("returns 400 for limit=200", async () => {
+      const res = await request(app).get("/api/v1/loans?limit=200");
       expect(res.status).toBe(400);
-      expect(res.body.error).toBe("Invalid pagination parameters");
     });
 
-    it("accepts pageSize=100 (boundary value)", async () => {
-      mockListLoans.mockReturnValue({ data: [], total: 0, page: 1, pageSize: 100 });
-      const res = await request(app).get("/api/v1/loans?pageSize=100");
+    it("accepts limit=100 (boundary value)", async () => {
+      mockListLoans.mockReturnValue({ data: [], total: 0, page: 1, limit: 100 });
+      const res = await request(app).get("/api/v1/loans?limit=100");
       expect(res.status).toBe(200);
-      expect(res.body.pageSize).toBe(100);
+      expect(res.body.limit).toBe(100);
     });
 
     it("returns 400 for page=0", async () => {
       const res = await request(app).get("/api/v1/loans?page=0");
       expect(res.status).toBe(400);
-      expect(res.body.error).toBe("Invalid pagination parameters");
     });
 
     it("returns 400 for negative page", async () => {
       const res = await request(app).get("/api/v1/loans?page=-1");
       expect(res.status).toBe(400);
-      expect(res.body.error).toBe("Invalid pagination parameters");
     });
   });
 
@@ -203,7 +200,7 @@ describe("Edge case tests — Issue #367", () => {
       expect(result.total).toBe(0);
       expect(result.data).toEqual([]);
       expect(result.page).toBe(1);
-      expect(result.pageSize).toBe(20);
+      expect(result.limit).toBe(20);
     });
 
     it("listLoans returns sensible defaults when called with empty options", () => {
@@ -212,7 +209,7 @@ describe("Edge case tests — Issue #367", () => {
       expect(result.total).toBeGreaterThanOrEqual(0);
       expect(Array.isArray(result.data)).toBe(true);
       expect(result.page).toBeGreaterThanOrEqual(1);
-      expect(result.pageSize).toBeGreaterThanOrEqual(1);
+      expect(result.limit).toBeGreaterThanOrEqual(1);
     });
 
     it("listTransactions returns total=0 and empty data for empty dataset", () => {

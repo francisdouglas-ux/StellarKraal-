@@ -1,6 +1,7 @@
-"use client";
-import Card from "@/components/Card";
-import SkeletonCollateralCard from "@/components/SkeletonCollateralCard";
+'use client';
+import Card from '@/components/Card';
+import SkeletonCollateralCard from '@/components/SkeletonCollateralCard';
+import EmptyState from '@/components/EmptyState';
 
 interface Collateral {
   id: string;
@@ -14,15 +15,21 @@ interface Props {
   collaterals: Collateral[];
   loading: boolean;
   onCardClick: (id: string) => void;
+  onAddCollateral?: () => void;
 }
 
 const ANIMAL_ICONS: Record<string, string> = {
-  cattle: "🐄",
-  goat: "🐐",
-  sheep: "🐑",
+  cattle: '🐄',
+  goat: '🐐',
+  sheep: '🐑',
 };
 
-export default function CollateralGrid({ collaterals, loading, onCardClick }: Props) {
+export default function CollateralGrid({
+  collaterals,
+  loading,
+  onCardClick,
+  onAddCollateral,
+}: Props) {
   if (loading) {
     return (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -33,12 +40,24 @@ export default function CollateralGrid({ collaterals, loading, onCardClick }: Pr
     );
   }
 
+  if (collaterals.length === 0) {
+    return (
+      <EmptyState
+        icon="🐄"
+        heading="No Collateral Registered"
+        message="Register your livestock as collateral to unlock loans. Start by adding your first animal."
+        ctaLabel="Register Collateral"
+        onCta={onAddCollateral}
+      />
+    );
+  }
+
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
       {collaterals.map((collateral) => {
         const xlmValue = (collateral.appraised_value / 1e7).toFixed(2);
         const usdValue = (parseFloat(xlmValue) * 0.12).toFixed(2);
-        const icon = ANIMAL_ICONS[collateral.animal_type] || "🐾";
+        const icon = ANIMAL_ICONS[collateral.animal_type] || '🐾';
 
         return (
           <button
@@ -57,9 +76,7 @@ export default function CollateralGrid({ collaterals, loading, onCardClick }: Pr
                 </div>
               }
               footer={
-                <p className="text-xs text-brown-500 font-mono">
-                  ID: {collateral.id.slice(0, 8)}…
-                </p>
+                <p className="text-xs text-brown-500 font-mono">ID: {collateral.id.slice(0, 8)}…</p>
               }
             >
               <h3 className="text-lg font-semibold text-brown-700 dark:text-cream-50 mb-3 capitalize">

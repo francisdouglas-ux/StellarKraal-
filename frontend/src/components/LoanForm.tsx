@@ -4,6 +4,8 @@ import { signTransaction } from "@/lib/freighterClient";
 import { submitSignedXdr } from "@/lib/stellarUtils";
 import { colors } from "@/lib/design-tokens";
 import Spinner from "@/components/Spinner";
+import { useToast } from "@/components/toast";
+import { Input, Select } from "@/components/ui";
 
 interface Props {
   walletAddress: string;
@@ -23,11 +25,10 @@ export default function LoanForm({ walletAddress, initialCollateralId }: Props) 
   const [collateralId, setCollateralId] = useState(initialCollateralId || '');
   const [loanAmount, setLoanAmount] = useState('');
   const [loading, setLoading] = useState(false);
-  const [status, setStatus] = useState<string | null>(null);
+  const toast = useToast();
 
   async function registerCollateral() {
     setLoading(true);
-    setStatus(null);
     try {
       const res = await fetch(`${API}/api/collateral/register`, {
         method: 'POST',
@@ -48,10 +49,10 @@ export default function LoanForm({ walletAddress, initialCollateralId }: Props) 
         network: process.env.NEXT_PUBLIC_NETWORK || "TESTNET",
       });
       const result = await submitSignedXdr(signedTxXdr);
-      setStatus(`✅ Collateral registered! ID: ${result}`);
+      toast.success(`Collateral registered! ID: ${result}`);
       setStep("loan");
     } catch (e: any) {
-      setStatus(`❌ ${e.message}`);
+      toast.error(e.message);
     } finally {
       setLoading(false);
     }
@@ -59,7 +60,6 @@ export default function LoanForm({ walletAddress, initialCollateralId }: Props) 
 
   async function requestLoan() {
     setLoading(true);
-    setStatus(null);
     try {
       const res = await fetch(`${API}/api/loan/request`, {
         method: 'POST',
@@ -79,9 +79,9 @@ export default function LoanForm({ walletAddress, initialCollateralId }: Props) 
         network: process.env.NEXT_PUBLIC_NETWORK || "TESTNET",
       });
       const result = await submitSignedXdr(signedTxXdr);
-      setStatus(`✅ Loan disbursed! Loan ID: ${result}`);
+      toast.success(`Loan disbursed! Loan ID: ${result}`);
     } catch (e: any) {
-      setStatus(`❌ ${e.message}`);
+      toast.error(e.message);
     } finally {
       setLoading(false);
     }
@@ -165,11 +165,6 @@ export default function LoanForm({ walletAddress, initialCollateralId }: Props) 
             )}
           </button>
         </>
-      )}
-      {status && (
-        <p className={`text-sm mt-2 ${status.includes("❌") ? colors.status.error.text : colors.status.success.text}`}>
-          {status}
-        </p>
       )}
     </div>
   );

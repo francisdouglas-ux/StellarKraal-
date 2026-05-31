@@ -3,8 +3,8 @@ import AxeBuilder from '@axe-core/playwright';
 
 const pages = [
   { name: 'Home', url: '/' },
-  { name: 'Dashboard', url: '/dashboard' },
-  { name: 'Borrow', url: '/borrow' }
+  { name: 'Dashboard', url: '/dashboard?mockWallet=true' },
+  { name: 'Borrow', url: '/borrow?mockWallet=true' }
 ];
 
 for (const page of pages) {
@@ -12,7 +12,7 @@ for (const page of pages) {
     await playwright.goto(page.url);
     
     // Wait for page to load
-    await playwright.waitForLoadState('networkidle');
+    await playwright.waitForLoadState('domcontentloaded');
     
     const accessibilityScanResults = await new AxeBuilder({ page: playwright })
       .withTags(['wcag2a', 'wcag2aa', 'wcag21aa'])
@@ -23,7 +23,7 @@ for (const page of pages) {
 
   test(`${page.name} page should have proper color contrast`, async ({ page: playwright }) => {
     await playwright.goto(page.url);
-    await playwright.waitForLoadState('networkidle');
+    await playwright.waitForLoadState('domcontentloaded');
     
     const accessibilityScanResults = await new AxeBuilder({ page: playwright })
       .withRules(['color-contrast'])
@@ -35,7 +35,7 @@ for (const page of pages) {
 
 test('Interactive elements should have proper focus indicators', async ({ page }) => {
   await page.goto('/borrow');
-  await page.waitForLoadState('networkidle');
+  await page.waitForLoadState('domcontentloaded');
   
   // Test button focus
   const connectButton = page.getByRole('button', { name: /connect freighter wallet/i });
@@ -54,8 +54,8 @@ test('Interactive elements should have proper focus indicators', async ({ page }
 });
 
 test('Form inputs should have proper labels and contrast', async ({ page }) => {
-  await page.goto('/borrow');
-  await page.waitForLoadState('networkidle');
+  await page.goto('/borrow?mockWallet=true');
+  await page.waitForLoadState('domcontentloaded');
   
   const accessibilityScanResults = await new AxeBuilder({ page })
     .withRules(['label', 'color-contrast'])

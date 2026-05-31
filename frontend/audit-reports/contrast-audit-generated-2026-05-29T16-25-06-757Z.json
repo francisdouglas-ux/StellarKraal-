@@ -1,0 +1,137 @@
+{
+  "timestamp": "2026-05-29T16:25:06.757Z",
+  "findings": [
+    {
+      "file": "src/app/dashboard/collateral/[id]/page.tsx",
+      "class": "bg-brown-600 text-cream-50 px-6 py-2 rounded-lg font-semibold hover:bg-brown-700 transition",
+      "text": "cream-50",
+      "bg": "brown-700",
+      "textHex": "#FFFFFF",
+      "bgHex": "#3D2810",
+      "ratio": 13.91,
+      "threshold": 4.5,
+      "passes": true
+    },
+    {
+      "file": "src/app/dashboard/page.tsx",
+      "class": "rounded-lg bg-gold-500 px-4 py-2 font-semibold text-cream-50 transition hover:bg-gold-600 flex items-center gap-2",
+      "text": "cream-50",
+      "bg": "gold-600",
+      "textHex": "#FFFFFF",
+      "bgHex": "#B45309",
+      "ratio": 5.02,
+      "threshold": 4.5,
+      "passes": true
+    },
+    {
+      "file": "src/app/loans/page.tsx",
+      "class": "text-xs px-2 py-0.5 rounded-full font-medium ${\n                        loan.status === \"active\"\n                          ? \"bg-success-light text-success-dark\"\n                          : loan.status === \"repaid\"\n                          ? \"bg-blue-100 text-blue-800\"\n                          : loan.status === \"liquidated\"\n                          ? \"bg-error-light text-error-dark\"\n                          : \"bg-brown-100 text-brown-700\"\n                      }",
+      "text": "brown-700",
+      "bg": "brown-100",
+      "textHex": "#3D2810",
+      "bgHex": "#F9EFE1",
+      "ratio": 12.23,
+      "threshold": 3,
+      "passes": true
+    },
+    {
+      "file": "src/app/onboarding-demo/page.tsx",
+      "class": "rounded-lg bg-brown-600 px-4 py-2 text-cream-50 transition hover:bg-brown-700",
+      "text": "cream-50",
+      "bg": "brown-700",
+      "textHex": "#FFFFFF",
+      "bgHex": "#3D2810",
+      "ratio": 13.91,
+      "threshold": 4.5,
+      "passes": true
+    },
+    {
+      "file": "src/app/onboarding-demo/page.tsx",
+      "class": "ml-3 rounded-lg bg-gold-600 px-4 py-2 text-cream-50 transition hover:bg-gold-700",
+      "text": "cream-50",
+      "bg": "gold-700",
+      "textHex": "#FFFFFF",
+      "bgHex": "#92400E",
+      "ratio": 7.09,
+      "threshold": 4.5,
+      "passes": true
+    },
+    {
+      "file": "src/components/CollateralRegistrationForm.tsx",
+      "class": "p-3 rounded-xl text-sm ${\n            isError ? \"bg-error-light text-error-dark\" : \"bg-success-light text-success-dark\"\n          }",
+      "text": "success-dark",
+      "bg": "success-light",
+      "textHex": "#15803D",
+      "bgHex": "#D4F4DD",
+      "ratio": 4.25,
+      "threshold": 3,
+      "passes": true
+    },
+    {
+      "file": "src/components/HelpMenu.tsx",
+      "class": "w-full text-left px-4 py-3 text-brown-700 hover:bg-brown-50 rounded-t-lg transition",
+      "text": "brown-700",
+      "bg": "brown-50",
+      "textHex": "#3D2810",
+      "bgHex": "#FDF8F3",
+      "ratio": 13.18,
+      "threshold": 4.5,
+      "passes": true
+    },
+    {
+      "file": "src/components/HelpMenu.tsx",
+      "class": "block px-4 py-3 text-brown-700 hover:bg-brown-50 rounded-b-lg transition",
+      "text": "brown-700",
+      "bg": "brown-50",
+      "textHex": "#3D2810",
+      "bgHex": "#FDF8F3",
+      "ratio": 13.18,
+      "threshold": 4.5,
+      "passes": true
+    },
+    {
+      "file": "src/components/LoadingStates.stories.tsx",
+      "class": "bg-brown-600 text-cream-50 py-2.5 rounded-xl font-semibold flex items-center justify-center gap-2 opacity-90",
+      "text": "cream-50",
+      "bg": "brown-600",
+      "textHex": "#FFFFFF",
+      "bgHex": "#5D3C15",
+      "ratio": 9.89,
+      "threshold": 4.5,
+      "passes": true
+    },
+    {
+      "file": "src/components/LoadingStates.stories.tsx",
+      "class": "bg-gold-600 text-cream-50 py-2.5 rounded-xl font-semibold flex items-center justify-center gap-2 opacity-90",
+      "text": "cream-50",
+      "bg": "gold-600",
+      "textHex": "#FFFFFF",
+      "bgHex": "#B45309",
+      "ratio": 5.02,
+      "threshold": 4.5,
+      "passes": true
+    },
+    {
+      "file": "src/components/OnboardingModal.tsx",
+      "class": "flex-1 px-4 py-2 text-brown-600 dark:text-brown-300 border border-brown-300 dark:border-brown-600 rounded-lg hover:bg-brown-50 dark:hover:bg-brown-700 transition",
+      "text": "brown-300",
+      "bg": "brown-700",
+      "textHex": "#D4A05A",
+      "bgHex": "#3D2810",
+      "ratio": 5.95,
+      "threshold": 4.5,
+      "passes": true
+    },
+    {
+      "file": "src/components/OnboardingModal.tsx",
+      "class": "flex-1 px-4 py-2 bg-brown-600 text-cream-50 rounded-lg hover:bg-brown-700 transition",
+      "text": "cream-50",
+      "bg": "brown-700",
+      "textHex": "#FFFFFF",
+      "bgHex": "#3D2810",
+      "ratio": 13.91,
+      "threshold": 4.5,
+      "passes": true
+    }
+  ]
+}

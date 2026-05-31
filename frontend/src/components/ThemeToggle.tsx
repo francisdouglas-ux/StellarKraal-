@@ -9,9 +9,15 @@ export default function ThemeToggle() {
     <button
       onClick={toggle}
       aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
-      className="rounded-lg p-2 text-xl transition hover:bg-[var(--color-border)] focus:outline-none focus-visible:ring-2 focus-visible:ring-gold"
+      title={isDark ? "Switch to light mode" : "Switch to dark mode"}
+      className={[
+        "rounded-lg p-2 min-h-[44px] min-w-[44px] flex items-center justify-center",
+        "text-xl transition-colors duration-200",
+        "hover:bg-[var(--color-border)] focus:outline-none",
+        "focus-visible:ring-2 focus-visible:ring-[var(--color-gold)]",
+      ].join(" ")}
     >
-      {isDark ? "☀️" : "🌙"}
+      <span aria-hidden="true">{isDark ? "☀️" : "🌙"}</span>
     </button>
   );
 }

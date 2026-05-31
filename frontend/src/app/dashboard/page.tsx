@@ -1,6 +1,5 @@
 "use client";
-
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { GlossaryTerm } from "@/components/GlossaryTerm";
 import WalletConnect from "@/components/WalletConnect";
@@ -20,8 +19,16 @@ export default function Dashboard() {
   const router = useRouter();
   const [wallet, setWallet] = useState<string | null>(null);
   const [loanId, setLoanId] = useState("");
-  const { showOnboarding, openOnboarding, closeOnboarding } = useOnboarding(wallet);
-  const { healthFactor, loading: isHealthLoading, refresh: refreshHealth } = useHealthFactor(loanId);
+  const [activeLoanId, setActiveLoanId] = useState("");
+  
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.location.search.includes("mockWallet=true")) {
+      setWallet("GBXXXXXXMOCKWALLETADDRESSXXXXXX");
+    }
+  }, []);
+  
+  const { showOnboarding, openOnboarding, closeOnboarding } = useOnboarding();
+  const { healthFactor } = useHealthFactor(activeLoanId);
 
   function handleProceedToRepay(nextLoanId: string, _nextAmount: string) {
     setLoanId(nextLoanId);

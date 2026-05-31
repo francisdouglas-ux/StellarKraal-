@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { ToastItem, ToastVariant } from "./ToastContext";
 
-const AUTO_DISMISS_MS = 5000;
+const AUTO_DISMISS_MS = 4000;
 
 const variantStyles: Record<ToastVariant, string> = {
   success: "bg-emerald-700 text-white",
