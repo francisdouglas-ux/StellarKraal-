@@ -5,6 +5,7 @@ import { submitSignedXdr } from "@/lib/stellarUtils";
 import { colors } from "@/lib/design-tokens";
 import Card from "@/components/Card";
 import Spinner from "@/components/Spinner";
+import { useToast } from "@/components/toast";
 
 interface Props {
   walletAddress: string;
@@ -82,11 +83,6 @@ export default function RepayPanel({ walletAddress }: Props) {
           ) : "Repay"}
         </button>
       </div>
-      {status && (
-        <p className={`text-sm mt-2 ${status.includes("❌") ? colors.status.error.text : colors.status.success.text}`}>
-          {status}
-        </p>
-      )}
     </Card>
   );
 }

@@ -6,7 +6,8 @@ import SearchFilterBar from '@/components/SearchFilterBar';
 import PageTransition from '@/components/PageTransition';
 import Card from '@/components/Card';
 import SkeletonLoanCard from '@/components/SkeletonLoanCard';
-import EmptyState from '@/components/EmptyState';
+import Pagination from '@/components/Pagination';
+import { usePagination } from '@/hooks/usePagination';
 import { badgeVariants } from '@/lib/animations';
 
 interface Loan {
@@ -27,6 +28,7 @@ function LoanListContent() {
   const reduced = useReducedMotion();
   const [loans, setLoans] = useState<Loan[]>([]);
   const [loading, setLoading] = useState(true);
+
   useEffect(() => {
     setLoading(true);
     fetch(`${API}/api/loans`)
@@ -48,6 +50,9 @@ function LoanListContent() {
     const matchesStatus = statuses.length === 0 || statuses.includes(loan.status);
     return matchesQuery && matchesStatus;
   });
+
+  const { page, limit, totalPages, setPage, setLimit, slice } = usePagination(filtered.length);
+  const paginated = slice(filtered);
 
   return (
     <div className="space-y-4">
@@ -106,12 +111,51 @@ function LoanListContent() {
                     >
                       {loan.status}
                     </motion.span>
+        <>
+          <ul className="space-y-2">
+            {paginated.map((loan) => (
+              <li key={loan.id}>
+                <Card>
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <p className="font-semibold text-brown-700 text-sm">Loan #{loan.id}</p>
+                      <p className="text-xs text-brown-500 truncate max-w-xs">{loan.borrower}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm font-medium text-brown-700">
+                        {loan.amount.toLocaleString()}
+                      </p>
+                      <motion.span
+                        key={loan.status}
+                        variants={reduced ? undefined : badgeVariants}
+                        initial="initial"
+                        animate="animate"
+                        className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                          loan.status === 'active'
+                            ? 'bg-success-light text-success-dark'
+                            : loan.status === 'repaid'
+                              ? 'bg-blue-100 text-blue-800'
+                              : loan.status === 'liquidated'
+                                ? 'bg-error-light text-error-dark'
+                                : 'bg-brown-100 text-brown-700'
+                        }`}
+                      >
+                        {loan.status}
+                      </motion.span>
+                    </div>
                   </div>
-                </div>
-              </Card>
-            </li>
-          ))}
-        </ul>
+                </Card>
+              </li>
+            ))}
+          </ul>
+          <Pagination
+            page={page}
+            totalPages={totalPages}
+            limit={limit}
+            onPageChange={setPage}
+            onLimitChange={setLimit}
+          />
+        </>
       )}
     </div>
   );

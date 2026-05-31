@@ -86,6 +86,15 @@ async function sendPagerDuty(rule: AlertRule, message: string, meta: object) {
   }
 }
 
+/**
+ * Dispatches a production alert through Slack and PagerDuty when the configured
+ * cooldown window has passed.
+ *
+ * @param rule - The alert rule metadata and routing configuration.
+ * @param message - Human-readable alert message describing the condition.
+ * @param meta - Optional metadata to include with the alert payload.
+ * @returns A promise that resolves once all external alert channels are requested.
+ */
 export async function fireAlert(
   rule: AlertRule,
   message: string,

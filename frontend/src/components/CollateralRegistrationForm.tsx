@@ -5,6 +5,16 @@ import { submitSignedXdr } from '@/lib/stellarUtils';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import Spinner from '@/components/Spinner';
 import { Input, Select, Button } from '@/components/ui';
+"use client";
+import { useState, useEffect, useCallback } from "react";
+import { signTransaction } from "@/lib/freighterClient";
+import { submitSignedXdr } from "@/lib/stellarUtils";
+import ConfirmDialog from "@/components/ConfirmDialog";
+import Spinner from "@/components/Spinner";
+import { motion, useReducedMotion } from "framer-motion";
+import { submitVariants } from "@/lib/animations";
+import { Input, Select, Button } from "@/components/ui";
+import { useToast } from "@/components/toast";
 
 interface Props {
   walletAddress: string;
@@ -42,6 +52,8 @@ const AUTO_SAVE_INTERVAL = 5000;
 const STORAGE_KEY = 'stellarkraal_collateral_form';
 
 export default function CollateralRegistrationForm({ walletAddress, onSuccess }: Props) {
+  const reduced = useReducedMotion();
+  const toast = useToast();
   const [formData, setFormData] = useState<FormData>({
     animalType: 'cattle',
     quantity: '',
@@ -54,7 +66,6 @@ export default function CollateralRegistrationForm({ walletAddress, onSuccess }:
     image: null,
   });
   const [errors, setErrors] = useState<FormErrors>({});
-  const [status, setStatus] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [showRestorePrompt, setShowRestorePrompt] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
@@ -202,7 +213,6 @@ export default function CollateralRegistrationForm({ walletAddress, onSuccess }:
 
   const registerCollateral = async () => {
     setLoading(true);
-    setStatus(null);
     try {
       const res = await fetch(`${API}/api/v1/collateral/register`, {
         method: 'POST',
@@ -223,7 +233,7 @@ export default function CollateralRegistrationForm({ walletAddress, onSuccess }:
         network: process.env.NEXT_PUBLIC_NETWORK || 'TESTNET',
       });
       const result = await submitSignedXdr(signedTxXdr);
-      setStatus(`Collateral registered successfully! ID: ${result}`);
+      toast.success(`Collateral registered successfully! ID: ${result}`);
       localStorage.removeItem(STORAGE_KEY);
       setLastSaved(null);
       setFormData({
@@ -243,6 +253,8 @@ export default function CollateralRegistrationForm({ walletAddress, onSuccess }:
     } catch (e: unknown) {
       const error = e instanceof Error ? e.message : 'Unknown error';
       setStatus(`error:${error}`);
+    } catch (e: any) {
+      toast.error(e.message || "Registration failed");
     } finally {
       setLoading(false);
     }
@@ -405,6 +417,10 @@ export default function CollateralRegistrationForm({ walletAddress, onSuccess }:
         <button
           type="submit"
           disabled={loading}
+        <motion.button
+          type="submit"
+          variants={reduced ? undefined : submitVariants}
+          animate={loading ? "loading" : "idle"}
           className="w-full bg-brown text-cream py-2.5 rounded-xl font-semibold hover:bg-brown/80 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
         >
           {loading ? (

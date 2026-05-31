@@ -3,25 +3,12 @@ import { config } from "./config";
 import express, { Request, Response, NextFunction } from "express";
 import {
   runMigrations,
-  getMigrationStatus,
-  insertCollateral,
-  listCollateral,
-  getCollateral,
-  softDeleteCollateral,
-  restoreCollateral,
   listDeletedCollateral,
-  insertLoan,
-  listLoans,
-  getLoan,
-  softDeleteLoan,
-  restoreLoan,
+  restoreCollateral,
+  softDeleteCollateral,
   listDeletedLoans,
-  insertTransaction,
-  listTransactions,
-  getTransaction,
-  updateTransaction,
-  type TransactionType,
-  type TransactionStatus,
+  restoreLoan,
+  softDeleteLoan,
 } from "./db/store";
 import { corsMiddleware } from "./middleware/cors";
 import {
@@ -39,6 +26,7 @@ import { pool, PoolExhaustedError } from "./utils/connectionPool";
 import { auditMiddleware } from "./middleware/audit";
 import { authRouter, jwtMiddleware } from "./middleware/auth";
 import { timeoutMiddleware } from "./middleware/timeout";
+import { authRouter, jwtMiddleware } from "./middleware/auth";
 import {
   getAppraisal,
   setAppraisal,
@@ -51,35 +39,7 @@ import { globalLimiter, authLimiter } from "./middleware/rateLimit";
 import { asyncHandler } from "./utils/asyncHandler";
 import { stellarPublicKeySchema } from "./validators/stellar";
 import rpcClient from "./utils/rpcClient";
-import { registerWebhook, getWebhooks, getDeliveryLogs, fireWebhooks } from "./webhooks";
-import { fireAlert } from "./utils/alerting";
-import { rules } from "./utils/alertRules";
-import {
-  registry,
-  httpRequestsTotal,
-  httpRequestDurationSeconds,
-  httpActiveConnections,
-} from "./metrics";
-
-// ── 5xx spike tracking (rolling 60s window) ───────────────────────────────────
-const fivexxTimestamps: number[] = [];
-const FIVEXX_WINDOW_MS = 60_000;
-const FIVEXX_THRESHOLD = 10;
-
-function track5xx() {
-  const now = Date.now();
-  fivexxTimestamps.push(now);
-  // evict old entries
-  while (fivexxTimestamps.length && fivexxTimestamps[0] < now - FIVEXX_WINDOW_MS) {
-    fivexxTimestamps.shift();
-  }
-  if (fivexxTimestamps.length >= FIVEXX_THRESHOLD) {
-    fireAlert(rules.fivexxSpike, `${fivexxTimestamps.length} 5xx errors in the last 60s`, {
-      count: fivexxTimestamps.length,
-      window: "60s",
-    });
-  }
-}
+import { registerWebhook, getWebhooks, getDeliveryLogs } from "./webhooks";
 
 // ── Idempotency cache (in-memory, 24h TTL) ───────────────────────────────────
 interface IdempotencyEntry {
@@ -104,8 +64,29 @@ function setIdempotencyEntry(key: string, status: number, body: unknown): void {
 
 const app = express();
 
+const isProduction = process.env.NODE_ENV === "production";
+const FRONTEND_URL = process.env.FRONTEND_URL;
+
+// Startup warning for CORS misconfiguration
+if (isProduction && !FRONTEND_URL) {
+  logger.warn(
+    "CORS misconfiguration: FRONTEND_URL is not set in production environment. Requests may be blocked.",
+  );
+}
+
 // Secure CORS configuration
-app.use(corsMiddleware);
+app.use((req: Request, res: Response, next: NextFunction) => {
+  // Allow credentials only for authenticated routes (e.g., API endpoints excluding health check)
+  const isAuthRoute = req.path.startsWith("/api") && req.path !== "/api/health";
+
+  const corsOptions: cors.CorsOptions = {
+    origin: isProduction ? FRONTEND_URL || false : isAuthRoute ? true : "*",
+    credentials: isAuthRoute,
+    maxAge: 86400, // Cache preflight requests for 24 hours
+  };
+
+  cors(corsOptions)(req, res, next);
+});
 app.use(express.json());
 app.use(globalLimiter);
 app.use(timeoutMiddleware(parseInt(config.TIMEOUT_GLOBAL_MS, 10)));
@@ -162,17 +143,6 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 // ── Auth ──────────────────────────────────────────────────────────────────────
 app.use("/api/auth", authLimiter, authRouter);
 app.use(jwtMiddleware);
-
-// ── API Docs (Swagger UI) ─────────────────────────────────────────────────────
-import swaggerUi from "swagger-ui-express";
-import openApiSpec from "../openapi.json";
-app.use("/api/docs", swaggerUi.serve, swaggerUi.setup(openApiSpec));
-
-// ── API Versioning ────────────────────────────────────────────────────────────
-import { v1Router } from "./routes/v1";
-
-// Mount v1 routes
-app.use("/api/v1", v1Router);
 
 const CONTRACT_ID = process.env.CONTRACT_ID || "";
 const NETWORK_PASSPHRASE =
@@ -337,19 +307,6 @@ async function buildContractTx(
 
 // ── routes ────────────────────────────────────────────────────────────────────
 
-// GET /metrics - Prometheus metrics (token-protected)
-app.get("/metrics", async (req: Request, res: Response) => {
-  const token = process.env.METRICS_TOKEN;
-  if (token) {
-    const auth = req.headers.authorization;
-    if (auth !== `Bearer ${token}`) {
-      return res.status(401).json({ error: "Unauthorized" });
-    }
-  }
-  res.set("Content-Type", registry.contentType);
-  res.end(await registry.metrics());
-});
-
 // GET /api/health - Health check endpoint
 app.get(
   "/api/health",
@@ -362,25 +319,18 @@ app.get(
         await pool.run((server) => server.getHealth());
         rpcReachable = true;
       } catch (error) {
-        logger.warn("RPC health check failed", { error: (error as Error).message });
+        console.warn("RPC health check failed:", (error as Error).message);
       }
 
-      const circuitStates = rpcClient.getCircuitStates();
-      const circuitHealthy = rpcClient.isHealthy();
-
       const healthData = {
-        status: rpcReachable && circuitHealthy ? "healthy" : "degraded",
+        status: rpcReachable ? "healthy" : "degraded",
         version: APP_VERSION,
         uptime,
         rpcReachable,
-        circuitBreaker: {
-          healthy: circuitHealthy,
-          states: circuitStates,
-        },
         pool: pool.stats(),
       };
 
-      res.status(rpcReachable && circuitHealthy ? 200 : 503).json(healthData);
+      res.status(rpcReachable ? 200 : 503).json(healthData);
     } catch (error) {
       next(error);
     }
@@ -489,19 +439,13 @@ app.post(
     if (!validation.success) {
       const body = {
         error: "Validation failed",
-        details: validation.error.issues,
+        details: validation.error.errors,
       };
       setIdempotencyEntry(idempotencyKey, 400, body);
       return res.status(400).json(body);
     }
 
     const { borrower, loan_id, amount } = validation.data;
-    logger.debug("Building loan repayment transaction", {
-      requestId: req.requestId,
-      borrower,
-      loan_id,
-      amount,
-    });
     const xdrTx = await buildContractTx(borrower, "repay_loan", [
       new Address(borrower).toScVal(),
       nativeToScVal(BigInt(loan_id), { type: "u64" }),
@@ -509,96 +453,7 @@ app.post(
     ]);
     const body = { xdr: xdrTx };
     setIdempotencyEntry(idempotencyKey, 200, body);
-    fireWebhooks("loan.repaid", { borrower, loan_id, amount });
     res.json(body);
-  }),
-);
-
-// POST /api/loan/repayment-preview
-app.post(
-  "/api/loan/repayment-preview",
-  asyncHandler(async (req: Request, res: Response) => {
-    const validation = loanRepaymentPreviewSchema.safeParse(req.body);
-    if (!validation.success) {
-      return res.status(400).json({
-        error: "Validation failed",
-        details: validation.error.issues,
-      });
-    }
-
-    const { loan_id, amount } = validation.data;
-    const contract = new Contract(CONTRACT_ID);
-    const account = await rpcClient.getAccount(
-      "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN",
-    );
-
-    const loanTx = new TransactionBuilder(account, {
-      fee: BASE_FEE,
-      networkPassphrase: NETWORK_PASSPHRASE,
-    })
-      .addOperation(
-        contract.call(
-          "get_loan",
-          nativeToScVal(BigInt(loan_id), { type: "u64" }),
-        ),
-      )
-      .setTimeout(30)
-      .build();
-
-    const loanResult = await rpcClient.simulateTransaction(loanTx);
-    const parsed = parseLoanFromSimulation((loanResult as any).result?.retval);
-
-    // Fetch dynamic fee config; fallback keeps preview resilient if read fails.
-    let interestFeeBps = 1000;
-    try {
-      const feeTx = new TransactionBuilder(account, {
-        fee: BASE_FEE,
-        networkPassphrase: NETWORK_PASSPHRASE,
-      })
-        .addOperation(contract.call("get_fee_config"))
-        .setTimeout(30)
-        .build();
-      const feeResult = await rpcClient.simulateTransaction(feeTx);
-      const feeConfig = parseFeeConfigFromSimulation(
-        (feeResult as any).result?.retval,
-      );
-      if (feeConfig) {
-        interestFeeBps = feeConfig.interest_fee_bps;
-      }
-    } catch {
-      // Preview remains available with sane default when fee config lookup fails.
-    }
-
-    const cappedRepayment = Math.min(amount, parsed.outstanding);
-    const interestOutstanding = Math.max(
-      parsed.outstanding - parsed.principal,
-      0,
-    );
-    const interestPaid = Math.min(cappedRepayment, interestOutstanding);
-    const principalPaid = cappedRepayment - interestPaid;
-    const fees = Math.floor((interestPaid * interestFeeBps) / 10_000);
-    const remainingBalance = Math.max(parsed.outstanding - cappedRepayment, 0);
-
-    const projectedHealthFactorBps =
-      remainingBalance === 0
-        ? null
-        : Math.floor(
-            (parsed.collateral_value * 8000 * 10_000) /
-              (remainingBalance * 10_000),
-          );
-
-    res.json({
-      loan_id,
-      repayment_amount: cappedRepayment,
-      breakdown: {
-        principal: principalPaid,
-        interest: interestPaid,
-        fees,
-        remaining_balance: remainingBalance,
-      },
-      projected_health_factor_bps: projectedHealthFactorBps,
-      fully_repaid: remainingBalance === 0,
-    });
   }),
 );
 
@@ -646,7 +501,7 @@ app.get(
     try {
       const contract = new Contract(CONTRACT_ID);
       const account = await rpcClient.getAccount(
-        "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN", // fee-less read account
+        "GAKH4BC5GSE5UQDWWPCBCNVYRDBI5JGYRQRGZJT3YJ477ZFDK5EUBMBH", // fee-less read account
       );
       const tx = new TransactionBuilder(account, {
         fee: BASE_FEE,
@@ -676,7 +531,7 @@ app.get(
     try {
       const contract = new Contract(CONTRACT_ID);
       const account = await rpcClient.getAccount(
-        "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN",
+        "GAKH4BC5GSE5UQDWWPCBCNVYRDBI5JGYRQRGZJT3YJ477ZFDK5EUBMBH",
       );
       const tx = new TransactionBuilder(account, {
         fee: BASE_FEE,
@@ -720,11 +575,8 @@ app.post(
     if (!url || typeof url !== "string") {
       return res.status(400).json({ error: "url is required" });
     }
-    try {
-      return res.status(201).json(registerWebhook(url));
-    } catch (err: any) {
-      return res.status(400).json({ error: err.message });
-    }
+    const reg = registerWebhook(url);
+    res.status(201).json(reg);
   },
 );
 
@@ -904,8 +756,6 @@ app.get(
 app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
   const reqLogger = (req as any).logger || logger;
   if (err instanceof PoolExhaustedError) {
-    track5xx();
-    fireAlert(rules.dbError, "Connection pool exhausted", { path: req.path });
     return res
       .status(503)
       .json({ error: "Service unavailable: connection pool exhausted" });
@@ -918,14 +768,16 @@ app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
   res.status(500).json({ error: err.message });
 });
 
-const PORT = parseInt(process.env.PORT || "3001", 10);
-const httpServer = app.listen(PORT, () => {
-  logger.info(`StellarKraal API running on port ${PORT}`, {
-    port: PORT,
-    environment: process.env.NODE_ENV || "development",
-    logLevel: process.env.LOG_LEVEL || "info",
+if (process.env.NODE_ENV !== "test") {
+  const PORT = parseInt(process.env.PORT || "3001", 10);
+  app.listen(PORT, () => {
+    logger.info(`StellarKraal API running on port ${PORT}`, {
+      port: PORT,
+      environment: process.env.NODE_ENV || "development",
+      logLevel: process.env.LOG_LEVEL || "info",
+    });
   });
-});
+}
 
 // ── Graceful Shutdown ─────────────────────────────────────────────────────────
 

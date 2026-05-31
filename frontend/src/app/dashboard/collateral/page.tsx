@@ -1,12 +1,14 @@
-"use client";
-import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
-import WalletConnect from "@/components/WalletConnect";
-import CollateralSummary from "@/components/CollateralSummary";
-import CollateralGrid from "@/components/CollateralGrid";
-import { Button } from "@/components/ui";
+'use client';
+import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import WalletConnect from '@/components/WalletConnect';
+import CollateralSummary from '@/components/CollateralSummary';
+import CollateralGrid from '@/components/CollateralGrid';
+import Pagination from '@/components/Pagination';
+import { usePagination } from '@/hooks/usePagination';
+import { Button } from '@/components/ui';
 
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
 interface Collateral {
   id: string;
@@ -35,11 +37,11 @@ export default function CollateralPage() {
     setError(null);
     try {
       const res = await fetch(`${API}/api/collateral/list?owner=${wallet}`);
-      if (!res.ok) throw new Error("Failed to fetch collaterals");
+      if (!res.ok) throw new Error('Failed to fetch collaterals');
       const data = await res.json();
       setCollaterals(data.collaterals || []);
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Unknown error');
     } finally {
       setLoading(false);
     }
@@ -48,6 +50,9 @@ export default function CollateralPage() {
   function handleCardClick(collateralId: string) {
     router.push(`/dashboard/collateral/${collateralId}`);
   }
+
+  const { page, limit, totalPages, setPage, setLimit, slice } = usePagination(collaterals.length);
+  const paginated = slice(collaterals);
 
   return (
     <main className="max-w-6xl mx-auto px-4 py-10">
@@ -60,9 +65,16 @@ export default function CollateralPage() {
             <>
               <CollateralSummary collaterals={collaterals} />
               <CollateralGrid
-                collaterals={collaterals}
+                collaterals={paginated}
                 loading={loading}
                 onCardClick={handleCardClick}
+              />
+              <Pagination
+                page={page}
+                totalPages={totalPages}
+                limit={limit}
+                onPageChange={setPage}
+                onLimitChange={setLimit}
               />
             </>
           ) : (
@@ -73,14 +85,15 @@ export default function CollateralPage() {
               <p className="text-brown-400 mb-6">
                 Register livestock as collateral to start borrowing
               </p>
-              <Button onClick={() => router.push("/borrow")}>
-                Register Collateral
-              </Button>
+              <Button onClick={() => router.push('/borrow')}>Register Collateral</Button>
             </div>
           )}
 
           {error && (
-            <div role="alert" className="mt-4 bg-error-light border border-error rounded-xl p-4 text-error-dark text-sm">
+            <div
+              role="alert"
+              className="mt-4 bg-error-light border border-error rounded-xl p-4 text-error-dark text-sm"
+            >
               {error}
             </div>
           )}
