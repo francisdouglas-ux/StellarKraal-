@@ -2,17 +2,114 @@
 @tailwind components;
 @tailwind utilities;
 
-<<<<<<< HEAD
+/* ── Light mode CSS variables ── */
+:root {
+  --color-bg: #FEFCF8;
+  --color-bg-secondary: #FDF6EC;
+  --color-bg-card: #FFFFFF;
+  --color-text: #3D2810;
+  --color-text-secondary: #5D3C15;
+  --color-text-muted: #8B5A1F;
+  --color-border: #F0D9B8;
+  --color-border-strong: #D4A05A;
+  --color-gold: #D97706;
+  --color-gold-hover: #B45309;
+  --color-nav-bg: #FEFCF8;
+  --color-nav-border: rgba(61, 40, 16, 0.1);
+  --color-skeleton-base: #e8ddd0;
+  --color-skeleton-shine: #f5ede0;
+}
+
+/* ── Dark mode CSS variables ── */
+.dark {
+  --color-bg: #1A1007;
+  --color-bg-secondary: #2A1B0B;
+  --color-bg-card: #2A1B0B;
+  --color-text: #FDF6EC;
+  --color-text-secondary: #F0D9B8;
+  --color-text-muted: #D4A05A;
+  --color-border: #3D2810;
+  --color-border-strong: #5D3C15;
+  --color-gold: #F8CA47;
+  --color-gold-hover: #FBDC7D;
+  --color-nav-bg: #2A1B0B;
+  --color-nav-border: rgba(240, 217, 184, 0.1);
+  --color-skeleton-base: #3D2810;
+  --color-skeleton-shine: #5D3C15;
+}
+
+/* ── Base styles using variables ── */
+body {
+  background-color: var(--color-bg);
+  color: var(--color-text);
+}
+
+/* ── Dark mode overrides for Tailwind utility classes ──
+   These ensure existing components using bg-cream / text-brown
+   automatically adapt without requiring per-component changes.
+*/
+.dark .bg-cream,
+.dark .bg-cream-50,
+.dark .bg-cream-100,
+.dark .bg-cream-200 {
+  background-color: var(--color-bg-card) !important;
+}
+
+.dark .bg-white {
+  background-color: var(--color-bg-card) !important;
+}
+
+.dark .text-brown,
+.dark .text-brown-700,
+.dark .text-brown-800 {
+  color: var(--color-text) !important;
+}
+
+.dark .text-brown-600 {
+  color: var(--color-text-secondary) !important;
+}
+
+.dark .text-brown-500,
+.dark .text-brown\/60,
+.dark .text-brown\/70 {
+  color: var(--color-text-muted) !important;
+}
+
+.dark .border-brown\/10,
+.dark .border-brown-200 {
+  border-color: var(--color-border) !important;
+}
+
+.dark .border-brown\/20,
+.dark .border-brown\/30 {
+  border-color: var(--color-border-strong) !important;
+}
+
+/* Card / panel backgrounds */
+.dark .shadow,
+.dark .shadow-lg,
+.dark .shadow-md {
+  --tw-shadow-color: rgba(0, 0, 0, 0.5);
+}
+
+/* ── Skeleton shimmer ── */
 @keyframes shimmer {
   0% { background-position: -200% 0; }
   100% { background-position: 200% 0; }
 }
 
 .skeleton-shimmer {
-  background: linear-gradient(90deg, #e8ddd0 25%, #f5ede0 50%, #e8ddd0 75%);
+  background: linear-gradient(
+    90deg,
+    var(--color-skeleton-base) 25%,
+    var(--color-skeleton-shine) 50%,
+    var(--color-skeleton-base) 75%
+  );
   background-size: 200% 100%;
   animation: shimmer 1.4s ease-in-out infinite;
-=======
+}
+
+/* ── Toast animations ── */
 @keyframes toast-slide-in {
   from {
     opacity: 0;
@@ -41,5 +138,4 @@
 
 .toast-exit {
   animation: toast-fade-out 0.3s ease-in forwards;
->>>>>>> adc36bf16cea1946dea369bf560370224ff8a132
 }

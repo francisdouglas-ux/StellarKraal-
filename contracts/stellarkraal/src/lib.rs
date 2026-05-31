@@ -29,15 +29,9 @@ const TREASURY: Symbol = symbol_short!("TREASURY");
 const ORIG_FEE: Symbol = symbol_short!("ORIGFEE"); // origination fee bps e.g. 50 = 0.5%
 const INT_FEE: Symbol = symbol_short!("INTFEE");   // interest fee bps e.g. 1000 = 10%
 const CLOSE_FACTOR: Symbol = symbol_short!("CLSFACT"); // close factor bps e.g. 5000 = 50%
-const PAUSED: Symbol = symbol_short!("PAUSED");
-const PAUSE_EXP: Symbol = symbol_short!("PAUSEEXP");
-const PAUSE_DUR: Symbol = symbol_short!("PAUSEDUR");
-// Oracle validation config
-const PRICE_MIN: Symbol = symbol_short!("PRICEMIN");  // minimum valid price
-const PRICE_MAX: Symbol = symbol_short!("PRICEMAX");  // maximum valid price
-const STALE_THR: Symbol = symbol_short!("STALETHR");  // staleness threshold in seconds (default 3600)
-const DEV_BPS: Symbol = symbol_short!("DEVBPS");      // max deviation in bps (default 2000 = 20%)
-
+const PAUSED: Symbol = symbol_short!("PAUSED");   // pause state flag
+const PAUSE_EXP: Symbol = symbol_short!("PAUSEXP"); // pause expiry timestamp
+const ORACLES: Symbol = symbol_short!("ORACLES");
 
 // ── Errors ───────────────────────────────────────────────────────────────────
 
@@ -70,22 +64,13 @@ pub enum Error {
     ExceedsCloseFactor = 11,
     /// Close factor must be between 1 and 10 000 bps.
     InvalidCloseFactor = 12,
-    /// Contract is currently paused; write operations are blocked.
     ContractPaused = 13,
-    /// Operation is already in progress (reentrancy detected).
-    AlreadyInProgress = 14,
-    /// Contract is not paused.
-    NotPaused = 15,
-    /// Contract is already paused.
-    AlreadyPaused = 16,
-    /// Oracle price is below the configured minimum bound.
-    PriceBelowMin = 17,
-    /// Oracle price is above the configured maximum bound.
-    PriceAboveMax = 18,
-    /// Oracle price update is older than the staleness threshold.
-    PriceStale = 19,
-    /// Oracle price deviates more than the allowed percentage from the last price.
-    PriceDeviationExceeded = 20,
+    OracleAlreadyRegistered = 14,
+    OracleLimitReached = 15,
+    OracleNotFound = 16,
+    InsufficientOracleQuorum = 17,
+    InvalidPrice = 18,
+    NotPaused = 19,
 }
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -149,34 +134,11 @@ pub struct FeeConfig {
 }
 
 #[contracttype]
-#[derive(Clone, Debug)]
-pub struct InterestRateModel {
-    pub base_rate_bps: u32,      // base interest rate in basis points
-    pub slope1_bps: u32,         // slope below kink in basis points
-    pub slope2_bps: u32,         // slope above kink in basis points
-    pub kink_bps: u32,           // utilization kink point in basis points
-}
-
-#[contracttype]
-#[derive(Clone, Debug)]
-pub struct TWAPData {
-    pub current_price: i128,     // current spot price
-    pub twap_price: i128,        // time-weighted average price
-    pub last_update: u64,        // timestamp of last price update
-}
-
-/// Oracle validation configuration.
-#[contracttype]
-#[derive(Clone, Debug)]
-pub struct OracleConfig {
-    /// Minimum acceptable price (inclusive). 0 means no lower bound.
-    pub price_min: i128,
-    /// Maximum acceptable price (inclusive). 0 means no upper bound.
-    pub price_max: i128,
-    /// Maximum age of a price update in seconds before it is considered stale.
-    pub staleness_threshold: u64,
-    /// Maximum allowed deviation from the previous price in basis points (e.g. 2000 = 20%).
-    pub max_deviation_bps: u32,
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OracleReport {
+    pub median: i128,
+    pub responses: u32,
+    pub flagged_count: u32,
 }
 
 // ── Storage helpers ──────────────────────────────────────────────────────────
@@ -920,225 +882,180 @@ impl StellarKraal {
         })
     }
 
-    // ── set_interest_rate_model ───────────────────────────────────────────
-    pub fn set_interest_rate_model(
-        env: Env,
-        admin: Address,
-        base_rate_bps: u32,
-        slope1_bps: u32,
-        slope2_bps: u32,
-        kink_bps: u32,
-    ) -> Result<(), Error> {
+    // ── set_pause_duration ────────────────────────────────────────────────
+    pub fn set_pause_duration(env: Env, admin: Address, duration: u64) -> Result<(), Error> {
         Self::assert_initialized(&env)?;
-        Self::assert_admin(&env, &admin)?;
         admin.require_auth();
-        
-        // Validate parameters
-        if kink_bps == 0 || kink_bps > 10_000 {
-            return Err(Error::InvalidAmount);
-        }
-        
-        env.storage().instance().set(&BASE_RATE, &base_rate_bps);
-        env.storage().instance().set(&SLOPE1, &slope1_bps);
-        env.storage().instance().set(&SLOPE2, &slope2_bps);
-        env.storage().instance().set(&KINK, &kink_bps);
-        Ok(())
-    }
-
-    // ── get_interest_rate_model ───────────────────────────────────────────
-    pub fn get_interest_rate_model(env: Env) -> Result<InterestRateModel, Error> {
-        Self::assert_initialized(&env)?;
-        let base: u32 = env.storage().instance().get(&BASE_RATE).unwrap_or(200);
-        let slope1: u32 = env.storage().instance().get(&SLOPE1).unwrap_or(500);
-        let slope2: u32 = env.storage().instance().get(&SLOPE2).unwrap_or(4500);
-        let kink: u32 = env.storage().instance().get(&KINK).unwrap_or(8000);
-        Ok(InterestRateModel {
-            base_rate_bps: base,
-            slope1_bps: slope1,
-            slope2_bps: slope2,
-            kink_bps: kink,
-        })
-    }
-
-    // ── get_current_interest_rate ─────────────────────────────────────────
-    /// Returns the current interest rate in basis points based on utilization
-    pub fn get_current_interest_rate(env: Env) -> Result<u32, Error> {
-        Self::assert_initialized(&env)?;
-        let utilization = Self::calculate_utilization(&env)?;
-        Ok(Self::calculate_interest_rate(&env, utilization)?)
-    }
-
-    // ── set_oracle_config ─────────────────────────────────────────────────
-    /// Update oracle price validation parameters.
-    ///
-    /// # Parameters
-    /// - `price_min`: Minimum valid price (0 = no lower bound).
-    /// - `price_max`: Maximum valid price (0 = no upper bound).
-    /// - `staleness_threshold`: Max age of a price update in seconds.
-    /// - `max_deviation_bps`: Max allowed deviation from last price in bps (e.g. 2000 = 20%).
-    ///
-    /// # Errors
-    /// - [`Error::NotInitialized`] / [`Error::Unauthorized`]
-    /// - [`Error::InvalidAmount`] if `price_min` > `price_max` (when both non-zero),
-    ///   `staleness_threshold` is 0, or `max_deviation_bps` > 10_000.
-    ///
-    /// # Security
-    /// Admin-only. Requires auth from `admin`.
-    pub fn set_oracle_config(
-        env: Env,
-        admin: Address,
-        price_min: i128,
-        price_max: i128,
-        staleness_threshold: u64,
-        max_deviation_bps: u32,
-    ) -> Result<(), Error> {
-        Self::assert_initialized(&env)?;
-        Self::assert_admin(&env, &admin)?;
-        admin.require_auth();
-        if staleness_threshold == 0 || max_deviation_bps > 10_000 {
-            return Err(Error::InvalidAmount);
-        }
-        if price_min > 0 && price_max > 0 && price_min > price_max {
-            return Err(Error::InvalidAmount);
-        }
-        env.storage().instance().set(&PRICE_MIN, &price_min);
-        env.storage().instance().set(&PRICE_MAX, &price_max);
-        env.storage().instance().set(&STALE_THR, &staleness_threshold);
-        env.storage().instance().set(&DEV_BPS, &max_deviation_bps);
-        Ok(())
-    }
-
-    // ── get_oracle_config ─────────────────────────────────────────────────
-    /// Return the current oracle validation configuration.
-    pub fn get_oracle_config(env: Env) -> Result<OracleConfig, Error> {
-        Self::assert_initialized(&env)?;
-        Ok(OracleConfig {
-            price_min: env.storage().instance().get(&PRICE_MIN).unwrap_or(0),
-            price_max: env.storage().instance().get(&PRICE_MAX).unwrap_or(0),
-            staleness_threshold: env.storage().instance().get(&STALE_THR).unwrap_or(3600),
-            max_deviation_bps: env.storage().instance().get(&DEV_BPS).unwrap_or(2000),
-        })
-    }
-
-    // ── submit_price ──────────────────────────────────────────────────────
-    /// Oracle submits a new price for collateral valuation.
-    ///
-    /// Validates:
-    /// 1. Price is positive.
-    /// 2. Price is within configured min/max bounds (if set).
-    /// 3. The update timestamp is not older than the staleness threshold.
-    /// 4. Price does not deviate more than `max_deviation_bps` from the last accepted price.
-    ///
-    /// Updates TWAP after all checks pass.
-    ///
-    /// # Parameters
-    /// - `oracle`: Must match the stored oracle address.
-    /// - `price`: New price value (must be > 0).
-    /// - `price_timestamp`: The timestamp at which the oracle observed this price.
-    ///
-    /// # Errors
-    /// - [`Error::Unauthorized`] if caller is not the stored oracle.
-    /// - [`Error::InvalidAmount`] if `price` ≤ 0.
-    /// - [`Error::PriceBelowMin`] if `price` < configured minimum.
-    /// - [`Error::PriceAboveMax`] if `price` > configured maximum.
-    /// - [`Error::PriceStale`] if `price_timestamp` is older than `staleness_threshold` seconds ago.
-    /// - [`Error::PriceDeviationExceeded`] if price deviates > `max_deviation_bps` from last price.
-    pub fn submit_price(env: Env, oracle: Address, price: i128, price_timestamp: u64) -> Result<(), Error> {
-        Self::assert_initialized(&env)?;
-        if price <= 0 {
-            return Err(Error::InvalidAmount);
-        }
-        oracle.require_auth();
-
-        let stored_oracle: Address = env.storage().instance().get(&ORACLE).unwrap();
-        if oracle != stored_oracle {
+        let stored_admin: Address = env.storage().instance().get(&ADMIN).ok_or(Error::NotInitialized)?;
+        if admin != stored_admin {
             return Err(Error::Unauthorized);
         }
+        env.storage().instance().set(&symbol_short!("PAUSEDUR"), &duration);
+        Ok(())
+    }
 
-        let now = env.ledger().timestamp();
-
-        // ── 1. Staleness check ────────────────────────────────────────────
-        let stale_thr: u64 = env.storage().instance().get(&STALE_THR).unwrap_or(3600);
-        if price_timestamp < now.saturating_sub(stale_thr) {
-            return Err(Error::PriceStale);
+    // ── pause ─────────────────────────────────────────────────────────────
+    pub fn pause(env: Env, admin: Address) -> Result<(), Error> {
+        Self::assert_initialized(&env)?;
+        admin.require_auth();
+        let stored_admin: Address = env.storage().instance().get(&ADMIN).ok_or(Error::NotInitialized)?;
+        if admin != stored_admin {
+            return Err(Error::Unauthorized);
         }
-
-        // ── 2. Bounds check ───────────────────────────────────────────────
-        let price_min: i128 = env.storage().instance().get(&PRICE_MIN).unwrap_or(0);
-        let price_max: i128 = env.storage().instance().get(&PRICE_MAX).unwrap_or(0);
-        if price_min > 0 && price < price_min {
-            return Err(Error::PriceBelowMin);
+        env.storage().instance().set(&PAUSED, &true);
+        let duration: u64 = env.storage().instance().get(&symbol_short!("PAUSEDUR")).unwrap_or(0);
+        if duration > 0 {
+            let expires_at = env.ledger().timestamp().checked_add(duration).ok_or(Error::InvalidAmount)?;
+            env.storage().instance().set(&PAUSE_EXP, &expires_at);
+        } else {
+            env.storage().instance().set(&PAUSE_EXP, &0u64);
         }
-        if price_max > 0 && price > price_max {
-            return Err(Error::PriceAboveMax);
-        }
+        Ok(())
+    }
 
-        // ── 3. Deviation check ────────────────────────────────────────────
-        let last_price: i128 = env.storage().instance().get(&LAST_PRICE).unwrap_or(0);
-        if last_price > 0 {
-            let dev_bps: u32 = env.storage().instance().get(&DEV_BPS).unwrap_or(2000);
-            // deviation = |price - last_price| * 10_000 / last_price
-            let diff = if price > last_price { price - last_price } else { last_price - price };
-            let deviation_bps = diff
-                .checked_mul(10_000)
-                .unwrap_or(i128::MAX)
-                / last_price;
-            if deviation_bps > dev_bps as i128 {
-                return Err(Error::PriceDeviationExceeded);
+    // ── unpause ───────────────────────────────────────────────────────────
+    pub fn unpause(env: Env, admin: Address) -> Result<(), Error> {
+        Self::assert_initialized(&env)?;
+        admin.require_auth();
+        let stored_admin: Address = env.storage().instance().get(&ADMIN).ok_or(Error::NotInitialized)?;
+        if admin != stored_admin {
+            return Err(Error::Unauthorized);
+        }
+        let paused: bool = env.storage().instance().get(&PAUSED).unwrap_or(false);
+        if !paused {
+            return Err(Error::NotPaused);
+        }
+        env.storage().instance().set(&PAUSED, &false);
+        env.storage().instance().set(&PAUSE_EXP, &0u64);
+        Ok(())
+    }
+
+    // ── add_oracle ────────────────────────────────────────────────────────
+    pub fn add_oracle(env: Env, admin: Address, oracle: Address) -> Result<(), Error> {
+        Self::assert_initialized(&env)?;
+        admin.require_auth();
+        let stored_admin: Address = env.storage().instance().get(&ADMIN).ok_or(Error::NotInitialized)?;
+        if admin != stored_admin {
+            return Err(Error::Unauthorized);
+        }
+        
+        let mut oracles = Self::get_oracles(env.clone());
+        if oracles.contains(&oracle) {
+            return Err(Error::OracleAlreadyRegistered);
+        }
+        if oracles.len() >= 5 {
+            return Err(Error::OracleLimitReached);
+        }
+        oracles.push_back(oracle);
+        env.storage().instance().set(&ORACLES, &oracles);
+        Ok(())
+    }
+
+    // ── remove_oracle ─────────────────────────────────────────────────────
+    pub fn remove_oracle(env: Env, admin: Address, oracle: Address) -> Result<(), Error> {
+        Self::assert_initialized(&env)?;
+        admin.require_auth();
+        let stored_admin: Address = env.storage().instance().get(&ADMIN).ok_or(Error::NotInitialized)?;
+        if admin != stored_admin {
+            return Err(Error::Unauthorized);
+        }
+        
+        let mut oracles = Self::get_oracles(env.clone());
+        let mut index = None;
+        for i in 0..oracles.len() {
+            if oracles.get(i).unwrap() == oracle {
+                index = Some(i);
+                break;
             }
         }
-
-        // ── Update TWAP ───────────────────────────────────────────────────
-        let window: u64 = env.storage().instance().get(&TWAP_WINDOW).unwrap_or(3600);
-        let last_time: u64 = env.storage().instance().get(&LAST_PRICE_TIME).unwrap_or(0);
-
-        let mut twap_sum: i128 = env.storage().instance().get(&TWAP_SUM).unwrap_or(0);
-        let mut twap_count: u32 = env.storage().instance().get(&TWAP_COUNT).unwrap_or(0);
-
-        if now.saturating_sub(last_time) >= window {
-            twap_sum = price;
-            twap_count = 1;
+        if let Some(idx) = index {
+            oracles.remove(idx);
+            env.storage().instance().set(&ORACLES, &oracles);
+            Ok(())
         } else {
-            twap_sum = twap_sum.checked_add(price).unwrap_or(i128::MAX);
-            twap_count = twap_count.saturating_add(1);
+            Err(Error::OracleNotFound)
         }
-
-        let new_twap = twap_sum / (twap_count as i128);
-
-        env.storage().instance().set(&LAST_PRICE, &price);
-        env.storage().instance().set(&LAST_PRICE_TIME, &now);
-        env.storage().instance().set(&TWAP_PRICE, &new_twap);
-        env.storage().instance().set(&TWAP_SUM, &twap_sum);
-        env.storage().instance().set(&TWAP_COUNT, &twap_count);
-
-        Ok(())
     }
 
-    // ── get_twap_data ─────────────────────────────────────────────────────
-    pub fn get_twap_data(env: Env) -> Result<TWAPData, Error> {
+    // ── get_oracles ───────────────────────────────────────────────────────
+    pub fn get_oracles(env: Env) -> Vec<Address> {
+        if let Some(oracles) = env.storage().instance().get::<_, Vec<Address>>(&ORACLES) {
+            oracles
+        } else {
+            let mut oracles = Vec::new(&env);
+            if let Some(oracle) = env.storage().instance().get::<_, Address>(&ORACLE) {
+                oracles.push_back(oracle);
+            }
+            oracles
+        }
+    }
+
+    // ── submit_oracle_prices ──────────────────────────────────────────────
+    pub fn submit_oracle_prices(
+        env: Env,
+        submitter: Address,
+        prices: Vec<i128>,
+    ) -> Result<OracleReport, Error> {
         Self::assert_initialized(&env)?;
-        let current: i128 = env.storage().instance().get(&LAST_PRICE).unwrap_or(0);
-        let twap: i128 = env.storage().instance().get(&TWAP_PRICE).unwrap_or(0);
-        let last_update: u64 = env.storage().instance().get(&LAST_PRICE_TIME).unwrap_or(0);
-        Ok(TWAPData {
-            current_price: current,
-            twap_price: twap,
-            last_update,
+        submitter.require_auth();
+        
+        let oracles = Self::get_oracles(env.clone());
+        if prices.len() != oracles.len() {
+            return Err(Error::InvalidPrice);
+        }
+        
+        let mut non_zero_prices = Vec::new(&env);
+        let mut responses = 0;
+        for price in prices.iter() {
+            if price > 0 {
+                non_zero_prices.push_back(price);
+                responses += 1;
+            }
+        }
+        
+        let min_quorum = if oracles.len() >= 3 { 3 } else { oracles.len() };
+        if responses < min_quorum {
+            return Err(Error::InsufficientOracleQuorum);
+        }
+        
+        let mut arr = [0i128; 5];
+        for i in 0..responses {
+            arr[i as usize] = non_zero_prices.get(i).unwrap();
+        }
+        
+        // Bubble sort
+        for i in 0..responses {
+            for j in (i+1)..responses {
+                if arr[i as usize] > arr[j as usize] {
+                    let tmp = arr[i as usize];
+                    arr[i as usize] = arr[j as usize];
+                    arr[j as usize] = tmp;
+                }
+            }
+        }
+        
+        let median = if responses % 2 == 1 {
+            arr[(responses / 2) as usize]
+        } else {
+            let mid = (responses / 2) as usize;
+            (arr[mid - 1] + arr[mid]) / 2
+        };
+        
+        let mut flagged_count = 0;
+        for price in prices.iter() {
+            if price > 0 {
+                let diff = if price > median { price - median } else { median - price };
+                if median > 0 && diff * 100 > median * 50 {
+                    flagged_count += 1;
+                }
+            }
+        }
+        
+        Ok(OracleReport {
+            median,
+            responses,
+            flagged_count,
         })
-    }
-
-    // ── set_twap_window ───────────────────────────────────────────────────
-    pub fn set_twap_window(env: Env, admin: Address, window_seconds: u64) -> Result<(), Error> {
-        Self::assert_initialized(&env)?;
-        Self::assert_admin(&env, &admin)?;
-        admin.require_auth();
-        
-        if window_seconds == 0 {
-            return Err(Error::InvalidAmount);
-        }
-        
-        env.storage().instance().set(&TWAP_WINDOW, &window_seconds);
-        Ok(())
     }
 
     // ── internal helpers ──────────────────────────────────────────────────
@@ -1164,6 +1081,9 @@ impl StellarKraal {
         }
         // Check auto-expiry
         let expires_at: u64 = env.storage().instance().get(&PAUSE_EXP).unwrap_or(0);
+        if expires_at == 0 {
+            return true;
+        }
         let now = env.ledger().timestamp();
         now < expires_at
     }

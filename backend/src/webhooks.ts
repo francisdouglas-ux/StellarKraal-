@@ -20,12 +20,21 @@ export interface DeliveryLog {
 const webhooks = new Map<string, WebhookRegistration>();
 const deliveryLogs: DeliveryLog[] = [];
 
-/** Reset in-memory state — for use in tests only. */
+/**
+ * Reset in-memory webhook state for deterministic testing.
+ */
 export function __resetForTests(): void {
   webhooks.clear();
   deliveryLogs.length = 0;
 }
 
+/**
+ * Register a new webhook listener.
+ *
+ * @param url - Destination URL for webhook delivery.
+ * @returns The registered webhook metadata record.
+ * @throws Error if the URL is invalid or unsupported.
+ */
 export function registerWebhook(url: string): WebhookRegistration {
   let parsed: URL;
   try {
@@ -42,10 +51,20 @@ export function registerWebhook(url: string): WebhookRegistration {
   return reg;
 }
 
+/**
+ * List all registered webhooks.
+ *
+ * @returns An array of registered webhook metadata.
+ */
 export function getWebhooks(): WebhookRegistration[] {
   return Array.from(webhooks.values());
 }
 
+/**
+ * Retrieve the current webhook delivery log entries.
+ *
+ * @returns An array of delivery log entries for recent webhook attempts.
+ */
 export function getDeliveryLogs(): DeliveryLog[] {
   return deliveryLogs;
 }
@@ -55,6 +74,13 @@ function sign(payload: string): string {
   return "sha256=" + crypto.createHmac("sha256", secret).update(payload).digest("hex");
 }
 
+/**
+ * Deliver an event payload to all registered webhooks.
+ *
+ * @param event - The webhook event name.
+ * @param payload - Payload object to send in the webhook body.
+ * @returns A promise that resolves once delivery attempts are scheduled.
+ */
 export async function fireWebhooks(event: string, payload: object): Promise<void> {
   const body = JSON.stringify({ event, payload, timestamp: Date.now() });
   const signature = sign(body);

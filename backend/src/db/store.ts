@@ -13,15 +13,23 @@ export interface CollateralRecord {
   animal_type: string;
   count: number;
   appraised_value: number;
+  species?: string;
+  breed?: string;
+  age?: number;
+  weight?: number;
+  image_url?: string;
   createdAt: string;
   deletedAt: string | null;
 }
+
+export type LoanStatus = "active" | "at_risk" | "repaid" | "liquidated";
 
 export interface LoanRecord {
   id: string;
   borrower: string;
   collateral_id: string;
   amount: number;
+  status: "active" | "repaid" | "liquidated";
   createdAt: string;
   deletedAt: string | null;
 }
@@ -120,47 +128,61 @@ export function listDeletedCollateral(): CollateralRecord[] {
  * @example
  * const loan = insertLoan({ id: "1", borrower: "G...", collateral_id: "1", amount: 600000 });
  */
-export function insertLoan(data: Omit<LoanRecord, "createdAt" | "deletedAt">): LoanRecord {
-  const record: LoanRecord = { ...data, createdAt: new Date().toISOString(), deletedAt: null };
+export function insertLoan(data: Omit<LoanRecord, "createdAt" | "deletedAt"> & { status?: LoanRecord["status"] }): LoanRecord {
+  const record: LoanRecord = { ...data, status: data.status ?? "active", createdAt: new Date().toISOString(), deletedAt: null };
   loanTable.set(record.id, record);
   return record;
 }
 
 /**
- * Return all non-deleted loan records with optional pagination.
- * @param filters - Optional pagination parameters.
- * @param filters.page - Page number (1-indexed, default 1).
- * @param filters.pageSize - Records per page (default 20, max 100).
- * @returns Paginated result with `data`, `total`, `page`, and `pageSize`.
+ * Return all non-deleted loan records with optional filtering and pagination.
+ * @param filters - Optional filter and pagination parameters.
+ * @returns Paginated result with `data`, `total`, `page`, and `limit`.
  */
 export function listLoans(filters?: {
+  status?: string;
+  borrowerAddress?: string;
+  from?: string;
+  to?: string;
   page?: number;
-  pageSize?: number;
-}): { data: LoanRecord[]; total: number; page: number; pageSize: number } {
-  const pageSize = Math.min(filters?.pageSize || 20, 100);
+  limit?: number;
+}): { data: LoanRecord[]; total: number; page: number; limit: number } {
+  const limit = Math.min(filters?.limit || 20, 100);
   const page = Math.max(filters?.page || 1, 1);
 
   let results = [...loanTable.values()].filter((r) => r.deletedAt === null);
 
-  // Sort by date descending (newest first)
+  if (filters?.status) results = results.filter((r) => r.status === filters.status);
+  if (filters?.borrowerAddress) results = results.filter((r) => r.borrower === filters.borrowerAddress);
+  if (filters?.from) results = results.filter((r) => new Date(r.createdAt) >= new Date(filters.from!));
+  if (filters?.to) results = results.filter((r) => new Date(r.createdAt) <= new Date(filters.to!));
+
+  // Sort by creation date descending
   results.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
   const total = results.length;
-  const start = (page - 1) * pageSize;
-  const end = start + pageSize;
-  const data = results.slice(start, end);
+  const data = results.slice((page - 1) * limit, page * limit);
 
-  return { data, total, page, pageSize };
+  return { data, total, page, limit };
 }
 
 /**
  * Fetch a single loan record by ID (excludes soft-deleted records).
- * @param id - Loan record ID.
- * @returns The {@link LoanRecord} or `undefined` if not found or deleted.
  */
 export function getLoan(id: string): LoanRecord | undefined {
   const r = loanTable.get(id);
   return r && r.deletedAt === null ? r : undefined;
+}
+
+/**
+ * Update fields on an existing loan record.
+ */
+export function updateLoan(id: string, updates: Partial<Omit<LoanRecord, "id" | "createdAt">>): LoanRecord | undefined {
+  const record = loanTable.get(id);
+  if (!record) return undefined;
+  const updated = { ...record, ...updates };
+  loanTable.set(id, updated);
+  return updated;
 }
 
 /**

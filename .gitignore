@@ -1,10 +1,60 @@
+# Dependencies
 node_modules/
-dist/
+**/node_modules/
+
+# Build artifacts - Frontend
 .next/
+out/
+build/
+dist/
+**/dist/
+**/.next/
+
+# Build artifacts - Backend
+backend/dist/
+backend/build/
+
+# Build artifacts - Rust/WASM
 target/
+**/target/
 *.wasm
+*.wasm.gz
+*.wasm.map
+
+# Environment variables
 .env
+.env.*
+!.env.example
+*.env
+!*.env.example
+
+# Logs
 *.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+pnpm-debug.log*
+
+# IDE directories and files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.sublime-project
+*.sublime-workspace
+.project
+.classpath
+.settings/
+*.iml
+
+# Testing
+coverage/
+.nyc_output/
+*.lcov
 
 # Terraform
 .terraform/

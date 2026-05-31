@@ -1,167 +1,137 @@
 const fs = require('fs');
 const path = require('path');
 
-// WCAG contrast ratios
-const WCAG_AA_NORMAL = 4.5;
-const WCAG_AA_LARGE = 3.0;
-
-// Color palette from design tokens
-const colors = {
-  brown: {
-    50: "#FDF8F3",
-    100: "#F9EFE1", 
-    200: "#F0D9B8",
-    300: "#D4A05A",
-    400: "#B8803D",
-    500: "#8B5A1F", // 5.87:1 on white
-    600: "#5D3C15", // 10.8:1 on white  
-    700: "#3D2810", // 13.9:1 on white
-    800: "#2A1B0B", // 17.1:1 on white
-    900: "#1A1007"  // 20.1:1 on white
-  },
-  gold: {
-    500: "#D97706", // 4.52:1 on white
-    600: "#B45309", // 6.1:1 on white
-    700: "#92400E", // 7.8:1 on white
-  },
-  cream: {
-    50: "#FFFFFF",   // Pure white
-    200: "#FDF6EC",  // Light cream
-  },
-  success: {
-    DEFAULT: "#16A34A", // 4.54:1 on white
-    dark: "#15803D"     // 6.2:1 on white
-  },
-  error: {
-    DEFAULT: "#DC2626", // 5.25:1 on white
-    dark: "#B91C1C"     // 7.1:1 on white
-  },
-  warning: {
-    DEFAULT: "#D97706", // 4.52:1 on white  
-    dark: "#B45309"     // 6.1:1 on white
+function flattenColors(colors) {
+  const map = {};
+  for (const [key, val] of Object.entries(colors)) {
+    if (typeof val === 'string') {
+      map[key] = val;
+    } else if (typeof val === 'object' && val !== null) {
+      for (const [sub, hex] of Object.entries(val)) {
+        if (sub === 'DEFAULT') {
+          map[key] = hex;
+        } else {
+          map[`${key}-${sub}`] = hex;
+        }
+      }
+    }
   }
-};
+  return map;
+}
 
-// Convert hex to RGB
 function hexToRgb(hex) {
-  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-  return result ? {
-    r: parseInt(result[1], 16),
-    g: parseInt(result[2], 16),
-    b: parseInt(result[3], 16)
-  } : null;
+  if (!hex) return null;
+  const h = hex.replace('#', '');
+  const bigint = parseInt(h.length === 3 ? h.split('').map(c=>c+c).join('') : h, 16);
+  return [(bigint >> 16) & 255, (bigint >> 8) & 255, bigint & 255];
 }
 
-// Calculate relative luminance
-function getLuminance(rgb) {
-  const { r, g, b } = rgb;
-  const [rs, gs, bs] = [r, g, b].map(c => {
-    c = c / 255;
-    return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
-  });
-  return 0.2126 * rs + 0.7152 * gs + 0.0722 * bs;
+function srgbChannel(c) {
+  c = c / 255;
+  return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
 }
 
-// Calculate contrast ratio
-function getContrastRatio(color1, color2) {
-  const lum1 = getLuminance(hexToRgb(color1));
-  const lum2 = getLuminance(hexToRgb(color2));
-  const brightest = Math.max(lum1, lum2);
-  const darkest = Math.min(lum1, lum2);
-  return (brightest + 0.05) / (darkest + 0.05);
+function luminance(hex) {
+  const rgb = hexToRgb(hex);
+  if (!rgb) return 0;
+  const [r, g, b] = rgb.map(srgbChannel);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 }
 
-// Test color combinations
-const testCombinations = [
-  // Primary text combinations
-  { fg: colors.brown[700], bg: colors.cream[50], name: "Primary text on white", size: "normal" },
-  { fg: colors.brown[600], bg: colors.cream[50], name: "Secondary text on white", size: "normal" },
-  { fg: colors.brown[500], bg: colors.cream[50], name: "Muted text on white", size: "normal" },
-  
-  // Button combinations
-  { fg: colors.cream[50], bg: colors.brown[600], name: "Primary button", size: "normal" },
-  { fg: colors.cream[50], bg: colors.gold[600], name: "Secondary button", size: "normal" },
-  
-  // Status colors
-  { fg: colors.success.dark, bg: colors.cream[50], name: "Success text", size: "normal" },
-  { fg: colors.error.dark, bg: colors.cream[50], name: "Error text", size: "normal" },
-  { fg: colors.warning.dark, bg: colors.cream[50], name: "Warning text", size: "normal" },
-  
-  // Form elements
-  { fg: colors.brown[700], bg: colors.cream[50], name: "Form input text", size: "normal" },
-  { fg: colors.brown[500], bg: colors.cream[50], name: "Form border", size: "normal" },
-];
+function contrastRatio(hex1, hex2) {
+  const L1 = luminance(hex1);
+  const L2 = luminance(hex2);
+  const lighter = Math.max(L1, L2);
+  const darker = Math.min(L1, L2);
+  return +( (lighter + 0.05) / (darker + 0.05) ).toFixed(2);
+}
 
-console.log('🎨 StellarKraal Color Contrast Audit Report');
-console.log('==========================================\n');
-
-let passCount = 0;
-let failCount = 0;
-const failures = [];
-
-testCombinations.forEach(({ fg, bg, name, size }) => {
-  const ratio = getContrastRatio(fg, bg);
-  const threshold = size === 'large' ? WCAG_AA_LARGE : WCAG_AA_NORMAL;
-  const passes = ratio >= threshold;
-  
-  if (passes) {
-    passCount++;
-    console.log(`✅ ${name}: ${ratio.toFixed(2)}:1 (${passes ? 'PASS' : 'FAIL'})`);
-  } else {
-    failCount++;
-    failures.push({ name, ratio: ratio.toFixed(2), threshold, fg, bg });
-    console.log(`❌ ${name}: ${ratio.toFixed(2)}:1 (FAIL - needs ${threshold}:1)`);
+function readTailwindColors() {
+  const configPath = path.resolve(__dirname, '..', 'tailwind.config.js');
+  if (!fs.existsSync(configPath)) {
+    console.error('tailwind.config.js not found');
+    process.exit(1);
   }
-});
-
-console.log(`\n📊 Summary: ${passCount} passed, ${failCount} failed`);
-
-if (failures.length > 0) {
-  console.log('\n🔧 Failures to fix:');
-  failures.forEach(failure => {
-    console.log(`   • ${failure.name}: ${failure.ratio}:1 (needs ${failure.threshold}:1)`);
-    console.log(`     FG: ${failure.fg}, BG: ${failure.bg}`);
-  });
+  const cfg = require(configPath);
+  const colors = (cfg.theme && cfg.theme.extend && cfg.theme.extend.colors) || {};
+  return flattenColors(colors);
 }
 
-// Generate audit report
-const report = {
-  timestamp: new Date().toISOString(),
-  summary: {
-    total: testCombinations.length,
-    passed: passCount,
-    failed: failCount,
-    passRate: `${((passCount / testCombinations.length) * 100).toFixed(1)}%`
-  },
-  results: testCombinations.map(({ fg, bg, name, size }) => {
-    const ratio = getContrastRatio(fg, bg);
-    const threshold = size === 'large' ? WCAG_AA_LARGE : WCAG_AA_NORMAL;
-    return {
-      name,
-      foreground: fg,
-      background: bg,
-      textSize: size,
-      contrastRatio: parseFloat(ratio.toFixed(2)),
-      threshold,
-      passes: ratio >= threshold,
-      wcagLevel: ratio >= threshold ? 'AA' : 'FAIL'
-    };
-  }),
-  failures: failures
-};
-
-// Save report
-const reportPath = path.join(__dirname, '../audit-reports');
-if (!fs.existsSync(reportPath)) {
-  fs.mkdirSync(reportPath, { recursive: true });
+function walkDir(dir, extensions = ['.ts', '.tsx', '.js', '.jsx', '.html']) {
+  const results = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const p = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      results.push(...walkDir(p, extensions));
+    } else if (extensions.includes(path.extname(entry.name))) {
+      results.push(p);
+    }
+  }
+  return results;
 }
 
-fs.writeFileSync(
-  path.join(reportPath, `contrast-audit-${new Date().toISOString().split('T')[0]}.json`),
-  JSON.stringify(report, null, 2)
-);
+function extractClassStrings(content) {
+  const out = [];
+  // match className="..." or className='...' or className={`...`} or class="..."
+  const re = /(?:className|class)\s*=\s*(?:\{`([^`]*)`\}|\"([^\"]*)\"|'([^']*)')/g;
+  let m;
+  while ((m = re.exec(content))) {
+    out.push(m[1] || m[2] || m[3] || '');
+  }
+  return out;
+}
 
-console.log(`\n📄 Full report saved to: audit-reports/contrast-audit-${new Date().toISOString().split('T')[0]}.json`);
+function analyze() {
+  const colors = readTailwindColors();
+  const src = path.resolve(__dirname, '..', 'src');
+  if (!fs.existsSync(src)) {
+    console.error('frontend/src not found');
+    process.exit(1);
+  }
 
-// Exit with error code if there are failures
-process.exit(failCount > 0 ? 1 : 0);
+  const files = walkDir(src);
+  const findings = [];
+
+  const tokenRe = /(?:\b|-)(?:bg|text|border|placeholder|accent|ring)-([a-z0-9-]+)/g;
+  const textSizeRe = /\btext-(xs|sm|base|lg|xl|2xl|3xl|4xl|5xl|6xl)\b/;
+
+  for (const file of files) {
+    const content = fs.readFileSync(file, 'utf8');
+    const classes = extractClassStrings(content);
+    for (const cls of classes) {
+      const tokens = { bg: null, text: null };
+      let m;
+      while ((m = tokenRe.exec(cls))) {
+        const full = m[0];
+        if (full.startsWith('bg-')) tokens.bg = m[1];
+        if (full.startsWith('text-')) tokens.text = m[1];
+      }
+      if (tokens.text && tokens.bg) {
+        const textToken = tokens.text;
+        const bgToken = tokens.bg;
+        const textHex = colors[textToken] || colors[textToken.replace(/-/g, '-')];
+        const bgHex = colors[bgToken] || colors[bgToken.replace(/-/g, '-')];
+        if (!textHex || !bgHex) continue;
+        const ratio = contrastRatio(textHex, bgHex);
+        const isLarge = textSizeRe.test(cls);
+        const threshold = isLarge ? 3.0 : 4.5;
+        const passes = ratio >= threshold;
+        findings.push({ file: path.relative(path.resolve(__dirname, '..'), file), class: cls, text: textToken, bg: bgToken, textHex, bgHex, ratio, threshold, passes });
+      }
+    }
+  }
+
+  const reportDir = path.resolve(__dirname, '..', 'audit-reports');
+  if (!fs.existsSync(reportDir)) fs.mkdirSync(reportDir, { recursive: true });
+  const reportPath = path.join(reportDir, `contrast-audit-generated-${new Date().toISOString().replace(/[:.]/g,'-')}.json`);
+  fs.writeFileSync(reportPath, JSON.stringify({ timestamp: new Date().toISOString(), findings }, null, 2));
+  const failures = findings.filter(f => !f.passes);
+  console.log(`Contrast audit complete: ${findings.length} checks, ${failures.length} failures`);
+  if (failures.length > 0) {
+    console.error('Failures:');
+    console.error(failures.slice(0, 20));
+    process.exit(2);
+  }
+}
+
+analyze();

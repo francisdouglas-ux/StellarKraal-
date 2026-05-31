@@ -15,7 +15,7 @@ import {
 import { z } from "zod";
 import { config } from "../config";
 import { pool } from "../utils/connectionPool";
-import { getAppraisal, setAppraisal, invalidateAll } from "../utils/appraisalCache";
+import { invalidateAll } from "../utils/appraisalCache";
 import { asyncHandler } from "../utils/asyncHandler";
 import { stellarPublicKeySchema } from "../validators/stellar";
 import { registerWebhook, getWebhooks, getDeliveryLogs, fireWebhooks } from "../webhooks";
@@ -57,11 +57,6 @@ const loanLiquidateSchema = z.object({
   liquidator: stellarPublicKeySchema,
   loan_id: z.number().int().nonnegative(),
   repay_amount: z.number().int().positive(),
-});
-
-const paginationSchema = z.object({
-  page: z.coerce.number().int().positive().optional().default(1),
-  pageSize: z.coerce.number().int().positive().max(100).optional().default(20),
 });
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -252,29 +247,33 @@ v1Router.get("/health/:loanId", async (req: Request, res: Response, next: NextFu
   }
 });
 
-// GET /loans - List loans with pagination
+// GET /loans - List loans with filtering and pagination
 v1Router.get("/loans", asyncHandler(async (req: Request, res: Response) => {
-  const validation = paginationSchema.safeParse(req.query);
-  if (!validation.success) {
-    return res.status(400).json({ error: "Invalid pagination parameters", details: validation.error.issues });
+  const pageRaw = req.query.page !== undefined ? Number(req.query.page) : 1;
+  const limitRaw = req.query.limit !== undefined ? Number(req.query.limit) : 20;
+
+  if (!Number.isInteger(pageRaw) || pageRaw < 1) {
+    return res.status(400).json({ error: "page must be a positive integer" });
+  }
+  if (!Number.isInteger(limitRaw) || limitRaw < 1 || limitRaw > 100) {
+    return res.status(400).json({ error: "limit must be between 1 and 100" });
   }
 
-  const { page, pageSize } = validation.data;
+  const { status, borrowerAddress, from, to } = req.query as Record<string, string | undefined>;
 
-  // Add deprecation warning header for unpaginated usage
-  if (!req.query.page && !req.query.pageSize) {
-    res.set("Deprecation", "true");
-    res.set("Sunset", new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toUTCString());
-    res.set("Warning", '299 - "Unpaginated loan listing is deprecated. Use ?page=1&pageSize=20 parameters."');
+  const validStatuses = ["active", "repaid", "liquidated"];
+  if (status && !validStatuses.includes(status)) {
+    return res.status(400).json({ error: `status must be one of: ${validStatuses.join(", ")}` });
+  }
+  if (from && isNaN(new Date(from).getTime())) {
+    return res.status(400).json({ error: "from must be a valid ISO date" });
+  }
+  if (to && isNaN(new Date(to).getTime())) {
+    return res.status(400).json({ error: "to must be a valid ISO date" });
   }
 
-  const result = listLoans({ page, pageSize });
-  res.json({
-    data: result.data,
-    total: result.total,
-    page: result.page,
-    pageSize: result.pageSize,
-  });
+  const result = listLoans({ status, borrowerAddress, from, to, page: pageRaw, limit: limitRaw });
+  res.json({ data: result.data, total: result.total, page: result.page, limit: result.limit });
 }));
 
 // POST /oracle/price-update
@@ -341,7 +340,7 @@ v1Router.post("/alerts/webhook", async (req: Request, res: Response) => {
           resourceArn: message.detail.resourceArn,
         });
       }
-    } catch (err) {
+    } catch {
       // Not a JSON message or different format
     }
   }

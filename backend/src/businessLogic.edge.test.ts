@@ -98,7 +98,7 @@ describe("listLoans – pagination edge cases", () => {
   it("returns page 1 with default pageSize when called with no args", () => {
     const result = listLoans();
     expect(result.page).toBe(1);
-    expect(result.pageSize).toBe(20);
+    expect(result.limit).toBe(20);
     expect(Array.isArray(result.data)).toBe(true);
   });
 
@@ -108,8 +108,8 @@ describe("listLoans – pagination edge cases", () => {
   });
 
   it("clamps pageSize to 100 when pageSize exceeds max", () => {
-    const result = listLoans({ pageSize: 999 });
-    expect(result.pageSize).toBe(100);
+    const result = listLoans({ limit: 999 });
+    expect(result.limit).toBe(100);
   });
 });
 
