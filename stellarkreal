@@ -1,0 +1,48 @@
+#325 [DOCS] Add inline JSDoc comments to all backend service functions
+Repo Avatar
+teslims2/StellarKraal-
+Priority: medium
+
+Description:
+Backend service functions have no inline documentation, making it difficult to understand their contracts without reading the implementation. Every exported function must have a JSDoc comment describing its purpose, parameters, return value, and thrown errors.
+
+Acceptance Criteria:
+
+All exported functions in the services directory have JSDoc comments
+JSDoc includes @param, @returns, and @throws tags where applicable
+Comments describe the business logic purpose, not just the technical implementation
+A linting rule enforces JSDoc on all exported functions
+Existing comments are reviewed for accuracy and updated where stale
+.....................................................................................................................
+
+#327 [DOCS] Document the Soroban smart contract interface
+Repo Avatar
+teslims2/StellarKraal-
+Priority: high
+
+Description:
+The Soroban contract has no documentation beyond the source code. A contract interface document must describe every public function, its parameters, return values, error codes, and the on-chain state it modifies.
+
+Acceptance Criteria:
+
+Every public contract function is documented with name, parameters, and return type
+Error codes are listed with their numeric values and descriptions
+On-chain state changes for each function are described
+Document explains how to invoke the contract using stellar-cli
+Document is stored in docs/contracts/ and linked from the README
+.................................................................................................................................................................................................................
+#328 [DOCS] Write ADR for the collateral appraisal model
+Repo Avatar
+teslims2/StellarKraal-
+Priority: medium
+
+Description:
+The decision to use off-chain appraisal values rather than on-chain oracles is a significant architectural choice with tradeoffs. An Architecture Decision Record must document the context, decision, alternatives considered, and consequences.
+
+Acceptance Criteria:
+
+ADR follows the template in docs/adr/template.md
+Context section explains the problem and constraints
+Decision section clearly states the chosen approach
+Alternatives section documents at least 2 rejected alternatives with reasons
+Consequences section covers both positive and negative outcomes

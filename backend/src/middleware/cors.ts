@@ -14,6 +14,14 @@ function isAuthRoute(path: string): boolean {
   return path.startsWith("/api") && path !== "/api/health";
 }
 
+/**
+ * Express middleware that applies CORS policy for frontend and authenticated API routes.
+ * In production, only the configured `FRONTEND_URL` is allowed.
+ *
+ * @param req - Incoming Express request.
+ * @param res - Express response object.
+ * @param next - Next middleware callback.
+ */
 export const corsMiddleware: RequestHandler = (
   req: Request,
   res: Response,
