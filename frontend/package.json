@@ -6,6 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "lint": "next lint",
     "test": "jest --passWithNoTests",
     "test:a11y": "playwright test -c playwright-a11y.config.ts",
     "test:e2e": "playwright test -c playwright.e2e.config.ts",
