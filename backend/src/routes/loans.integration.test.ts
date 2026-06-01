@@ -351,6 +351,9 @@ describe("POST /api/v1/loan/liquidate (liquidate loan)", () => {
   beforeEach(() => { app = createApp(); });
 
   it("returns 200 and XDR for eligible loan (valid payload)", async () => {
+    // Seed a liquidatable loan: HF = (700_000 × 8000) / (600_000 × 10_000) × 10_000 = 9_333 (< 10_000)
+    seedCollateral("liq-col-1", 700_000);
+    seedLoan("1", "liq-col-1", 600_000);
     const res = await request(app)
       .post("/api/v1/loan/liquidate")
       .send({ liquidator: VALID_ADDRESS, loan_id: 1, repay_amount: 300_000 });
@@ -437,11 +440,74 @@ describe("Full loan lifecycle integration", () => {
     expect(repayRes.status).toBe(200);
     expect(repayRes.body.xdr).toBeDefined();
 
-    // 5. Liquidate loan
+    // 5. Liquidate loan — seed a liquidatable loan (HF < 10_000) for this step
+    seedCollateral("lifecycle-col", 500_000);
+    seedLoan("2001", "lifecycle-col", 600_000);
     const liquidateRes = await request(app)
       .post("/api/v1/loan/liquidate")
-      .send({ liquidator: VALID_ADDRESS, loan_id: 1, repay_amount: 300_000 });
+      .send({ liquidator: VALID_ADDRESS, loan_id: 2001, repay_amount: 300_000 });
     expect(liquidateRes.status).toBe(200);
     expect(liquidateRes.body.xdr).toBeDefined();
+  });
+});
+
+// ── Liquidation acceptance criteria (issue #293) ──────────────────────────────
+
+describe("POST /api/v1/loan/liquidate — health factor & state (issue #293)", () => {
+  let app: Express;
+
+  beforeEach(() => { app = createApp(); });
+
+  it("returns 400 when loan health factor is above liquidation threshold (safe loan)", async () => {
+    // Collateral value 1_000_000, loan 600_000 → HF = 13_333 (safe)
+    seedCollateral("hf-col-safe", 1_000_000);
+    seedLoan("1001", "hf-col-safe", 600_000);
+
+    const res = await request(app)
+      .post("/api/v1/loan/liquidate")
+      .send({ liquidator: VALID_ADDRESS, loan_id: 1001, repay_amount: 300_000 });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/health factor/i);
+  });
+
+  it("returns 200 and updates loan status to liquidated when HF < 10_000", async () => {
+    // Collateral value 700_000, loan 600_000 → HF = 9_333 (liquidatable)
+    seedCollateral("hf-col-liq", 700_000);
+    seedLoan("1002", "hf-col-liq", 600_000);
+
+    const res = await request(app)
+      .post("/api/v1/loan/liquidate")
+      .send({ liquidator: VALID_ADDRESS, loan_id: 1002, repay_amount: 300_000 });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty("xdr");
+    expect(res.body).toHaveProperty("loan");
+    expect(res.body.loan.status).toBe("liquidated");
+    expect(res.body).toHaveProperty("api_version", "v1");
+  });
+
+  it("returns 404 when loan does not exist", async () => {
+    const res = await request(app)
+      .post("/api/v1/loan/liquidate")
+      .send({ liquidator: VALID_ADDRESS, loan_id: 9999, repay_amount: 300_000 });
+
+    expect(res.status).toBe(404);
+    expect(res.body.error).toMatch(/not found/i);
+  });
+
+  it("returns final loan state in response body", async () => {
+    seedCollateral("hf-col-state", 500_000);
+    seedLoan("1003", "hf-col-state", 600_000);
+
+    const res = await request(app)
+      .post("/api/v1/loan/liquidate")
+      .send({ liquidator: VALID_ADDRESS, loan_id: 1003, repay_amount: 300_000 });
+
+    expect(res.status).toBe(200);
+    expect(res.body.loan).toMatchObject({
+      id: "1003",
+      status: "liquidated",
+    });
   });
 });

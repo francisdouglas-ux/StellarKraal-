@@ -116,6 +116,17 @@ export function getCollateral(id: string): CollateralRecord | undefined {
 }
 
 /**
+ * Update fields on an existing collateral record.
+ */
+export function updateCollateral(id: string, updates: Partial<Omit<CollateralRecord, "id" | "createdAt">>): CollateralRecord | undefined {
+  const record = collateralTable.get(id);
+  if (!record) return undefined;
+  const updated = { ...record, ...updates };
+  collateralTable.set(id, updated);
+  return updated;
+}
+
+/**
  * Soft-delete a collateral record by setting its `deletedAt` timestamp.
  * @param id - Collateral record ID.
  * @returns `true` if the record was deleted, `false` if not found or already deleted.
@@ -376,4 +387,33 @@ export function updateTransaction(id: string, updates: Partial<Omit<TransactionR
   const updated = { ...record, ...updates, updatedAt: new Date().toISOString() };
   transactionTable.set(id, updated);
   return updated;
+}
+
+// ── Liquidation Events ────────────────────────────────────────────────────────
+
+export interface LiquidationEvent {
+  id: string;
+  loan_id: string;
+  liquidator: string;
+  repay_amount: number;
+  timestamp: string;
+}
+
+const liquidationEventTable: Map<string, LiquidationEvent> = new Map();
+
+/**
+ * Record a liquidation event.
+ */
+export function insertLiquidationEvent(data: Omit<LiquidationEvent, "id" | "timestamp">): LiquidationEvent {
+  const id = `liq_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  const record: LiquidationEvent = { ...data, id, timestamp: new Date().toISOString() };
+  liquidationEventTable.set(id, record);
+  return record;
+}
+
+/**
+ * List all liquidation events for a given loan.
+ */
+export function getLiquidationEvents(loan_id: string): LiquidationEvent[] {
+  return [...liquidationEventTable.values()].filter((e) => e.loan_id === loan_id);
 }

@@ -24,10 +24,12 @@ import { writeLimiter } from "../middleware/rateLimit";
 import { fireAlert } from "../utils/alerting";
 import { rules } from "../utils/alertRules";
 import rpcClient from "../utils/rpcClient";
-import { listLoans } from "../db/store";
+import { listLoans, getLoan, updateLoan, getCollateral, updateCollateral, insertTransaction, insertLiquidationEvent } from "../db/store";
 const CONTRACT_ID = process.env.CONTRACT_ID || "";
 const NETWORK_PASSPHRASE =
   config.NEXT_PUBLIC_NETWORK === "mainnet" ? Networks.PUBLIC : Networks.TESTNET;
+
+const SCALE = 10_000;
 
 const APP_VERSION = process.env["npm_package_version"] || "1.0.0";
 const startTime = Date.now();
@@ -193,13 +195,43 @@ v1Router.post(
       return res.status(400).json({ error: "Validation failed", details: validation.error.issues });
     }
     const { liquidator, loan_id, repay_amount } = validation.data;
+
+    // Fetch loan and verify it exists
+    const loan = getLoan(String(loan_id));
+    if (!loan) {
+      return res.status(404).json({ error: `Loan ${loan_id} not found` });
+    }
+
+    // Check health factor — reject if loan is safe (HF >= SCALE)
+    const collateral = getCollateral(loan.collateral_id);
+    const collateralValue = collateral?.appraised_value ?? 0;
+    const hf = loan.amount > 0 && collateralValue > 0
+      ? (collateralValue * 8_000) / (loan.amount * SCALE) * SCALE
+      : null;
+
+    if (hf === null || hf >= SCALE) {
+      return res.status(400).json({ error: "Loan health factor is above liquidation threshold", health_factor: hf });
+    }
+
+    // Invoke Soroban liquidation function
     const xdrTx = await buildContractTx(liquidator, "liquidate", [
       new Address(liquidator).toScVal(),
       nativeToScVal(BigInt(loan_id), { type: "u64" }),
       nativeToScVal(BigInt(repay_amount), { type: "i128" }),
     ]);
+
+    // Update loan and collateral status to liquidated
+    const updatedLoan = updateLoan(loan.id, { status: "liquidated" });
+    if (collateral) {
+      updateCollateral(collateral.id, { status: "liquidated" });
+    }
+
+    // Record liquidation event
+    insertLiquidationEvent({ loan_id: loan.id, liquidator, repay_amount });
+    insertTransaction({ borrower: loan.borrower, type: "liquidation", status: "completed", amount: repay_amount, loanId: loan.id, collateralId: loan.collateral_id });
+
     fireWebhooks("loan.liquidated", { liquidator, loan_id, repay_amount });
-    res.json({ xdr: xdrTx });
+    res.json({ xdr: xdrTx, loan: updatedLoan });
   })
 );
 
