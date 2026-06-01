@@ -1,5 +1,5 @@
 'use client';
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useCallback, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { motion, useReducedMotion } from 'framer-motion';
 import SearchFilterBar from '@/components/SearchFilterBar';
@@ -7,7 +7,9 @@ import PageTransition from '@/components/PageTransition';
 import Card from '@/components/Card';
 import SkeletonLoanCard from '@/components/SkeletonLoanCard';
 import Pagination from '@/components/Pagination';
+import EmptyState from '@/components/EmptyState';
 import { usePagination } from '@/hooks/usePagination';
+import { usePolling } from '@/hooks/usePolling';
 import { badgeVariants } from '@/lib/animations';
 
 interface Loan {
@@ -20,6 +22,7 @@ interface Loan {
 
 const STATUS_OPTIONS = ['active', 'repaid', 'liquidated', 'pending'];
 const TYPE_OPTIONS: string[] = [];
+const POLL_INTERVAL = 15_000;
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
@@ -28,15 +31,20 @@ function LoanListContent() {
   const reduced = useReducedMotion();
   const [loans, setLoans] = useState<Loan[]>([]);
   const [loading, setLoading] = useState(true);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
-  useEffect(() => {
-    setLoading(true);
+  const fetchLoans = useCallback(() => {
     fetch(`${API}/api/loans`)
       .then((r) => r.json())
-      .then((data) => setLoans(Array.isArray(data) ? data : []))
-      .catch(() => setLoans([]))
+      .then((data) => {
+        setLoans(Array.isArray(data) ? data : (Array.isArray(data?.data) ? data.data : []));
+        setLastUpdated(new Date());
+      })
+      .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
+
+  usePolling(fetchLoans, POLL_INTERVAL);
 
   const q = (searchParams.get('q') ?? '').toLowerCase();
   const statuses = searchParams.getAll('status');
@@ -58,11 +66,18 @@ function LoanListContent() {
 
   return (
     <div className="space-y-4">
-      <SearchFilterBar
-        statusOptions={STATUS_OPTIONS}
-        typeOptions={TYPE_OPTIONS}
-        searchPlaceholder="Search by borrower address…"
-      />
+      <div className="flex items-center justify-between">
+        <SearchFilterBar
+          statusOptions={STATUS_OPTIONS}
+          typeOptions={TYPE_OPTIONS}
+          searchPlaceholder="Search by borrower address…"
+        />
+        {lastUpdated && (
+          <p className="text-xs text-brown-400 shrink-0 ml-4" aria-live="polite">
+            Updated {lastUpdated.toLocaleTimeString()}
+          </p>
+        )}
+      </div>
 
       {loading ? (
         <ul className="space-y-2">
@@ -83,36 +98,6 @@ function LoanListContent() {
           }
         />
       ) : (
-        <ul className="space-y-2">
-          {filtered.map((loan) => (
-            <li key={loan.id}>
-              <Card>
-                <div className="flex justify-between items-center">
-                  <div>
-                    <p className="font-semibold text-brown-700 text-sm">Loan #{loan.id}</p>
-                    <p className="text-xs text-brown-500 truncate max-w-xs">{loan.borrower}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-sm font-medium text-brown-700">
-                      {loan.amount.toLocaleString()}
-                    </p>
-                    <motion.span
-                      key={loan.status}
-                      variants={reduced ? undefined : badgeVariants}
-                      initial="initial"
-                      animate="animate"
-                      className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                        loan.status === 'active'
-                          ? 'bg-success-light text-success-dark'
-                          : loan.status === 'repaid'
-                            ? 'bg-blue-100 text-blue-800'
-                            : loan.status === 'liquidated'
-                              ? 'bg-error-light text-error-dark'
-                              : 'bg-brown-100 text-brown-700'
-                      }`}
-                    >
-                      {loan.status}
-                    </motion.span>
         <>
           <ul className="space-y-2">
             {paginated.map((loan) => (
