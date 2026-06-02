@@ -268,6 +268,14 @@ export function listDeletedLoans(): LoanRecord[] {
   return [...loanTable.values()].filter((r) => r.deletedAt !== null);
 }
 
+/** Returns true if the collateral is already pledged to an active (non-deleted) loan. */
+export function isCollateralPledged(collateralId: string): boolean {
+  return [...loanTable.values()].some(
+    (r) => r.collateral_id === collateralId && r.deletedAt === null,
+  );
+}
+
+// ── Migration helper (documents schema intent) ────────────────────────────────
 /**
  * Check if a collateral record is currently pledged to an active loan.
  * @param collateralId - Collateral record ID.
