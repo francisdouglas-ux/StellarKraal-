@@ -143,12 +143,7 @@ app.get("/api/health", async (_req: Request, res: Response) => {
   });
 });
 
-app.use(globalLimiter);
-app.use(timeoutMiddleware(parseInt(config.TIMEOUT_GLOBAL_MS, 10)));
 app.use(correlationMiddleware);
-app.use(loggingMiddleware);
-app.use("/uploads", express.static(path.join(__dirname, "..", "uploads")));
-
 // Request ID middleware
 app.use((req: Request, res: Response, next: NextFunction) => {
   const requestId = randomUUID();
@@ -159,6 +154,11 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   res.setHeader("X-Request-ID", requestId);
   next();
 });
+app.use(globalLimiter);
+app.use(timeoutMiddleware(parseInt(config.TIMEOUT_GLOBAL_MS, 10)));
+app.use(loggingMiddleware);
+app.use("/uploads", express.static(path.join(__dirname, "..", "uploads")));
+
 
 // Shutdown middleware - reject new requests during graceful shutdown
 let isShuttingDown = false;
