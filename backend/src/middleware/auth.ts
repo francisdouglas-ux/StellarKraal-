@@ -2,12 +2,12 @@
  * JWT authentication middleware and auth routes.
  *
  * Flow:
- *   1. GET  /api/auth/challenge  — returns a one-time challenge string
- *   2. POST /api/auth/login      — client submits { publicKey, signature, challenge }
- *                                  backend verifies Stellar signature, issues JWT + refresh token
+ *   1. GET  /api/auth/challenge  — returns a one-time challenge nonce
+ *   2. POST /api/auth/login      — client submits { walletAddress, signedChallenge: { nonce, signature } }
+ *                                  backend verifies Stellar ed25519 signature, issues JWT + refresh token
  *   3. POST /api/auth/refresh    — exchanges a valid refresh token for a new JWT
  *
- * JWT expires in 15 minutes; refresh tokens expire in 7 days.
+ * JWT expires in 24 hours by default; refresh tokens expire in 7 days.
  * All POST/PUT/DELETE routes (except auth endpoints) require a valid JWT.
  */
 import { Request, Response, NextFunction, Router } from 'express';
@@ -19,7 +19,7 @@ import { Keypair } from '@stellar/stellar-sdk';
 const JWT_SECRET = process.env.JWT_SECRET ?? 'change-me-in-production-min-32-chars!!';
 const ACCESS_TTL_MS = process.env.JWT_EXPIRES_IN_MS
   ? parseInt(process.env.JWT_EXPIRES_IN_MS, 10)
-  : 15 * 60 * 1000; // default 15 minutes
+  : 24 * 60 * 60 * 1000; // default 24 hours
 const REFRESH_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const CHALLENGE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -76,35 +76,44 @@ authRouter.get('/challenge', (_req: Request, res: Response) => {
   res.json({ challenge });
 });
 
-// POST /api/auth/login — verify Stellar signature, issue JWT
+// POST /api/auth/login — verify Stellar wallet signature, issue JWT
+// Accepts { walletAddress, signedChallenge: { nonce, signature } }
 authRouter.post('/login', (req: Request, res: Response) => {
-  const { publicKey, signature, challenge } = req.body as {
-    publicKey?: string;
-    signature?: string;
-    challenge?: string;
+  const { walletAddress, signedChallenge } = req.body as {
+    walletAddress?: string;
+    signedChallenge?: { nonce?: string; signature?: string };
   };
 
-  if (!publicKey || !signature || !challenge) {
-    return res.status(400).json({ error: 'publicKey, signature, and challenge are required' });
+  if (!walletAddress || !signedChallenge?.nonce || !signedChallenge?.signature) {
+    return res.status(400).json({
+      error: 'walletAddress and signedChallenge (with nonce and signature) are required',
+    });
   }
 
-  // Validate challenge exists and hasn't expired
-  const expiry = challenges.get(challenge);
+  const { nonce, signature } = signedChallenge;
+
+  // Validate nonce was issued by this server and hasn't expired
+  const expiry = challenges.get(nonce);
   if (!expiry || Date.now() > expiry) {
     return res.status(401).json({ error: 'Invalid or expired challenge' });
   }
-  challenges.delete(challenge); // one-time use
+  challenges.delete(nonce); // one-time use
 
   // Verify Stellar ed25519 signature
   try {
-    const kp = Keypair.fromPublicKey(publicKey);
-    const valid = kp.verify(Buffer.from(challenge, 'hex'), Buffer.from(signature, 'hex'));
+    const kp = Keypair.fromPublicKey(walletAddress);
+    const valid = kp.verify(Buffer.from(nonce, 'hex'), Buffer.from(signature, 'hex'));
     if (!valid) return res.status(401).json({ error: 'Signature verification failed' });
   } catch {
-    return res.status(401).json({ error: 'Invalid public key or signature' });
+    return res.status(401).json({ error: 'Invalid wallet address or signature' });
   }
 
-  res.json(issueTokens(publicKey));
+  const now = Date.now();
+  const exp = now + ACCESS_TTL_MS;
+  const accessToken = signJwt({ sub: walletAddress, iat: Math.floor(now / 1000), exp: Math.floor(exp / 1000) });
+  const refreshToken = randomBytes(32).toString('hex');
+  refreshTokens.set(refreshToken, { publicKey: walletAddress, exp: now + REFRESH_TTL_MS });
+  res.json({ accessToken, refreshToken, expiresIn: ACCESS_TTL_MS / 1000 });
 });
 
 // POST /api/auth/refresh — rotate refresh token

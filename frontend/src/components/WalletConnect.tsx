@@ -1,4 +1,7 @@
 "use client";
+import { useState } from "react";
+import { isConnected, getAddress, setAllowed } from "@stellar/freighter-api";
+import Tooltip from "@/components/Tooltip";
 import { useEffect } from "react";
 import { colors } from "@/lib/design-tokens";
 import { useWallet } from "@/hooks/useWallet";
@@ -45,6 +48,15 @@ export default function WalletConnect({ onConnect }: Props) {
 
   return (
     <div className="mb-6">
+      <Tooltip hint="W — Connect wallet">
+        <button
+          onClick={connect}
+          className="bg-brown text-cream px-5 py-2.5 rounded-xl font-semibold hover:bg-brown/80 transition"
+        >
+          Connect Freighter Wallet
+        </button>
+      </Tooltip>
+      {error && <p className="text-red-500 text-sm mt-2">{error}</p>}
       <button
         onClick={connect}
         disabled={connecting}

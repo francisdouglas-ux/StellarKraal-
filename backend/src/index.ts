@@ -19,6 +19,7 @@ import {
   softDeleteLoan,
   restoreLoan,
   listDeletedLoans,
+  isCollateralPledged,
   insertTransaction,
   listTransactions,
   getTransaction,
@@ -48,6 +49,7 @@ import {
   invalidateAll,
   configureCacheTTL,
 } from "./utils/appraisalCache";
+import { responseCacheMiddleware, invalidateCache } from "./utils/responseCache";
 import { randomUUID } from "crypto";
 import path from "path";
 import { mkdirSync } from "fs";
@@ -143,12 +145,7 @@ app.get("/api/health", async (_req: Request, res: Response) => {
   });
 });
 
-app.use(globalLimiter);
-app.use(timeoutMiddleware(parseInt(config.TIMEOUT_GLOBAL_MS, 10)));
 app.use(correlationMiddleware);
-app.use(loggingMiddleware);
-app.use("/uploads", express.static(path.join(__dirname, "..", "uploads")));
-
 // Request ID middleware
 app.use((req: Request, res: Response, next: NextFunction) => {
   const requestId = randomUUID();
@@ -159,6 +156,11 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   res.setHeader("X-Request-ID", requestId);
   next();
 });
+app.use(globalLimiter);
+app.use(timeoutMiddleware(parseInt(config.TIMEOUT_GLOBAL_MS, 10)));
+app.use(loggingMiddleware);
+app.use("/uploads", express.static(path.join(__dirname, "..", "uploads")));
+
 
 // Shutdown middleware - reject new requests during graceful shutdown
 let isShuttingDown = false;
@@ -248,6 +250,12 @@ const loanRepaySchema = z.object({
 const loanRepaymentPreviewSchema = z.object({
   loan_id: z.number().int().nonnegative(),
   amount: z.number().int().positive(),
+});
+
+const createLoanSchema = z.object({
+  borrowerAddress: stellarPublicKeySchema,
+  collateralId: z.string().min(1),
+  requestedAmount: z.number().int().positive(),
 });
 
 type LoanPreviewShape = {
@@ -439,6 +447,7 @@ app.post(
       nativeToScVal(BigInt(amount), { type: "i128" }),
     ]);
     fireWebhooks("loan.approved", { borrower, collateral_id, amount });
+    invalidateCache("/api/loans");
     res.json({ xdr: xdrTx, ...(cached?.stale ? { stale: true } : {}) });
   }),
 );
@@ -483,11 +492,141 @@ app.post(
   }),
 );
 
+// POST /api/loan/repayment-preview
+app.post(
+  "/api/loan/repayment-preview",
+  asyncHandler(async (req: Request, res: Response) => {
+    const validation = loanRepaymentPreviewSchema.safeParse(req.body);
+    if (!validation.success) {
+      return res.status(400).json({
+        error: "Validation failed",
+        details: validation.error.errors,
+      });
+    }
+
+    const { loan_id, amount } = validation.data;
+    const contract = new Contract(CONTRACT_ID);
+    const account = await rpcClient.getAccount(
+      "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN",
+    );
+
+    const loanTx = new TransactionBuilder(account, {
+      fee: BASE_FEE,
+      networkPassphrase: NETWORK_PASSPHRASE,
+    })
+      .addOperation(
+        contract.call(
+          "get_loan",
+          nativeToScVal(BigInt(loan_id), { type: "u64" }),
+        ),
+      )
+      .setTimeout(30)
+      .build();
+
+    const loanResult = await rpcClient.simulateTransaction(loanTx);
+    const parsed = parseLoanFromSimulation((loanResult as any).result?.retval);
+
+    // Fetch dynamic fee config; fallback keeps preview resilient if read fails.
+    let interestFeeBps = 1000;
+    try {
+      const feeTx = new TransactionBuilder(account, {
+        fee: BASE_FEE,
+        networkPassphrase: NETWORK_PASSPHRASE,
+      })
+        .addOperation(contract.call("get_fee_config"))
+        .setTimeout(30)
+        .build();
+      const feeResult = await rpcClient.simulateTransaction(feeTx);
+      const feeConfig = parseFeeConfigFromSimulation(
+        (feeResult as any).result?.retval,
+      );
+      if (feeConfig) {
+        interestFeeBps = feeConfig.interest_fee_bps;
+      }
+    } catch {
+      // Preview remains available with sane default when fee config lookup fails.
+    }
+
+    const cappedRepayment = Math.min(amount, parsed.outstanding);
+    const interestOutstanding = Math.max(
+      parsed.outstanding - parsed.principal,
+      0,
+    );
+    const interestPaid = Math.min(cappedRepayment, interestOutstanding);
+    const principalPaid = cappedRepayment - interestPaid;
+    const fees = Math.floor((interestPaid * interestFeeBps) / 10_000);
+    const remainingBalance = Math.max(parsed.outstanding - cappedRepayment, 0);
+
+    const projectedHealthFactorBps =
+      remainingBalance === 0
+        ? null
+        : Math.floor(
+            (parsed.collateral_value * 8000 * 10_000) /
+              (remainingBalance * 10_000),
+          );
+
+    res.json({
+      loan_id,
+      repayment_amount: cappedRepayment,
+      breakdown: {
+        principal: principalPaid,
+        interest: interestPaid,
+        fees,
+        remaining_balance: remainingBalance,
+      },
+      projected_health_factor_bps: projectedHealthFactorBps,
+      fully_repaid: remainingBalance === 0,
+    });
+  }),
+);
+
+// POST /api/loan/create
+app.post(
+  "/api/loan/create",
+  timeoutMiddleware(parseInt(config.TIMEOUT_WRITE_MS, 10)),
+  asyncHandler(async (req: Request, res: Response) => {
+    const validation = createLoanSchema.safeParse(req.body);
+    if (!validation.success) {
+      return res.status(400).json({ error: "Validation failed", details: validation.error.errors });
+    }
+
+    const { borrowerAddress, collateralId, requestedAmount } = validation.data;
+
+    const collateral = getCollateral(collateralId);
+    if (!collateral) {
+      return res.status(404).json({ error: "Collateral not found" });
+    }
+
+    if (isCollateralPledged(collateralId)) {
+      return res.status(409).json({ error: "Collateral is already pledged to another loan" });
+    }
+
+    const maxLoanAmount = Math.floor(collateral.appraised_value * 0.8);
+    const loanAmount = Math.min(requestedAmount, maxLoanAmount);
+
+    const xdrTx = await buildContractTx(borrowerAddress, "request_loan", [
+      new Address(borrowerAddress).toScVal(),
+      nativeToScVal(collateralId, { type: "string" }),
+      nativeToScVal(BigInt(loanAmount), { type: "i128" }),
+    ]);
+
+    const loan = insertLoan({
+      id: randomUUID(),
+      borrower: borrowerAddress,
+      collateral_id: collateralId,
+      amount: loanAmount,
+    });
+
+    return res.status(201).json({ loan, xdr: xdrTx });
+  }),
+);
+
 // GET /api/loans — paginated loan listing
 // Deprecated: unpaginated usage will be removed in a future version.
 app.get(
   "/api/loans",
   readLimiter,
+  responseCacheMiddleware,
   asyncHandler(async (req: Request, res: Response) => {
     const pageRaw = req.query.page !== undefined ? Number(req.query.page) : 1;
     const pageSizeVal = req.query.pageSize !== undefined ? req.query.pageSize : req.query.limit;
@@ -519,6 +658,24 @@ app.get(
   }),
 );
 
+// GET /api/borrowers/:wallet — aggregate borrower profile (settings + collateral + loans)
+app.get(
+  "/api/borrowers/:wallet",
+  readLimiter,
+  asyncHandler(async (req: Request, res: Response) => {
+    const wallet = req.params.wallet as string;
+
+    const collateralResult = listCollateral({ ownerId: wallet, page: 1, limit: 100 });
+    const loansResult = listLoans({ borrowerAddress: wallet, page: 1, limit: 100 });
+
+    res.json({
+      wallet,
+      collateral: collateralResult.data,
+      loans: loansResult.data,
+    });
+  }),
+);
+
 // GET /api/collateral — paginated, filterable collateral listing
 const collateralQuerySchema = z.object({
   page: z.coerce.number().int().positive().optional().default(1),
@@ -529,6 +686,7 @@ const collateralQuerySchema = z.object({
 
 app.get(
   "/api/collateral",
+  responseCacheMiddleware,
   asyncHandler(async (req: Request, res: Response) => {
     const validation = collateralQuerySchema.safeParse(req.query);
     if (!validation.success) {
@@ -919,6 +1077,7 @@ app.post(
       image_url: imageUrl,
     });
 
+    invalidateCache("/api/collateral");
     res.status(201).json(record);
   }),
 );
@@ -940,6 +1099,7 @@ app.post("/api/v1/collateral", timeoutMiddleware(parseInt(config.TIMEOUT_WRITE_M
   }
   const { owner, animal_type, count, appraised_value } = validation.data;
   const record = insertCollateral({ id: randomUUID(), owner, animal_type, count, appraised_value });
+  invalidateCache("/api/collateral");
   res.status(201).json(record);
 }));
 
@@ -1075,6 +1235,7 @@ app.put(
 
     const newBalance = loan.outstanding_balance - amount;
     const updated = updateLoan(req.params.id, { outstanding_balance: newBalance });
+    invalidateCache("/api/loans");
 
     insertTransaction({
       borrower: loan.borrower,

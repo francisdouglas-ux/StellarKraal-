@@ -18,6 +18,7 @@ describe("timeoutMiddleware", () => {
     req = {
       method: "POST",
       path: "/api/test",
+      headers: {},
     } as Partial<Request>;
 
     res = {
@@ -40,14 +41,17 @@ describe("timeoutMiddleware", () => {
     expect(next).toHaveBeenCalledTimes(1);
   });
 
-  it("should return 504 when request exceeds timeout", () => {
+  it("should return 503 when request exceeds timeout", () => {
     const middleware = timeoutMiddleware(1000);
     middleware(req as Request, res as Response, next);
 
     jest.advanceTimersByTime(1001);
 
-    expect(statusMock).toHaveBeenCalledWith(504);
-    expect(jsonMock).toHaveBeenCalledWith({ error: "Request timeout" });
+    expect(statusMock).toHaveBeenCalledWith(503);
+    expect(jsonMock).toHaveBeenCalledWith({
+      error: "Service Unavailable",
+      message: "Request exceeded the maximum allowed time of 10 seconds",
+    });
   });
 
   it("should not timeout if response finishes in time", () => {
@@ -103,11 +107,26 @@ describe("timeoutMiddleware", () => {
 
     jest.advanceTimersByTime(15001);
 
-    expect(mockLogger.warn).toHaveBeenCalledWith("Request timeout", {
+    expect(mockLogger.warn).toHaveBeenCalledWith("Request timed out", expect.objectContaining({
       requestId: "test-request-id",
       method: "POST",
       path: "/api/test",
       timeoutMs: 15000,
-    });
+    }));
+    const logDetails = mockLogger.warn.mock.calls[0][1];
+    expect(logDetails).toHaveProperty("elapsedTime");
+    expect(typeof logDetails.elapsedTime).toBe("string");
+    expect(logDetails.elapsedTime).toMatch(/\d+ms/);
+  });
+
+  it("should skip timeout for WebSocket upgrade requests", () => {
+    req.headers = { upgrade: "websocket" };
+    const middleware = timeoutMiddleware(1000);
+    middleware(req as Request, res as Response, next);
+
+    jest.advanceTimersByTime(1001);
+
+    expect(statusMock).not.toHaveBeenCalled();
+    expect(next).toHaveBeenCalledTimes(1);
   });
 });

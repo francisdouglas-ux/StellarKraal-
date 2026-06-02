@@ -85,10 +85,13 @@ describe("LoanForm – button disabled state", () => {
     render(<LoanForm walletAddress="GTEST" />);
     // Advance to loan step
     fireEvent.change(screen.getByPlaceholderText("Count"), { target: { value: "1" } });
+    fireEvent.change(screen.getByPlaceholderText("Appraised value (stroops)"), { target: { value: "100000" } });
     fireEvent.click(screen.getByText("Register & Continue"));
     await waitFor(() => screen.getByText("2. Request Loan"));
 
-    // Click Request Loan — fetch never resolves so loading stays true
+    // Fill loan fields then click — fetch never resolves so loading stays true
+    fireEvent.change(screen.getByPlaceholderText("Collateral ID"), { target: { value: "1" } });
+    fireEvent.change(screen.getByPlaceholderText("Loan amount (stroops)"), { target: { value: "5000" } });
     fireEvent.click(screen.getByText("Request Loan"));
 
     await waitFor(() => {
@@ -103,6 +106,8 @@ describe("LoanForm – step navigation", () => {
     fetchMock.mockRejectedValue(new Error("Server error"));
 
     render(<LoanForm walletAddress="GTEST" />);
+    fireEvent.change(screen.getByPlaceholderText("Count"), { target: { value: "1" } });
+    fireEvent.change(screen.getByPlaceholderText("Appraised value (stroops)"), { target: { value: "100000" } });
     fireEvent.click(screen.getByText("Register & Continue"));
 
     await waitFor(() => screen.getByText("❌ Server error"));

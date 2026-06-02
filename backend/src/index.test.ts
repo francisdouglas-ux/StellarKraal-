@@ -1,5 +1,6 @@
 import request from "supertest";
 import app from "./index";
+import { insertCollateral, isCollateralPledged, insertLoan } from "./db/store";
 import {
   insertCollateral,
   insertLoan,
@@ -444,6 +445,94 @@ describe("StellarKraal API", () => {
     });
   });
 
+  describe("POST /api/loan/create", () => {
+    let collateralId: string;
+
+    beforeEach(() => {
+      collateralId = `test-collateral-${Date.now()}-${Math.random()}`;
+      insertCollateral({
+        id: collateralId,
+        owner: VALID_ADDRESS,
+        animal_type: "cattle",
+        count: 10,
+        appraised_value: 1000000,
+      });
+    });
+
+    it("returns 201 with loan and xdr for valid payload", async () => {
+      const res = await request(app).post("/api/loan/create").send({
+        borrowerAddress: VALID_ADDRESS,
+        collateralId,
+        requestedAmount: 500000,
+      });
+      expect(res.status).toBe(201);
+      expect(res.body).toHaveProperty("loan");
+      expect(res.body).toHaveProperty("xdr");
+      expect(res.body.loan.borrower).toBe(VALID_ADDRESS);
+      expect(res.body.loan.collateral_id).toBe(collateralId);
+      expect(res.body.loan.amount).toBe(500000);
+    });
+
+    it("caps loan amount at 80% of appraised_value", async () => {
+      const res = await request(app).post("/api/loan/create").send({
+        borrowerAddress: VALID_ADDRESS,
+        collateralId,
+        requestedAmount: 9999999,
+      });
+      expect(res.status).toBe(201);
+      expect(res.body.loan.amount).toBe(800000); // 80% of 1_000_000
+    });
+
+    it("returns 400 for missing required fields", async () => {
+      const res = await request(app).post("/api/loan/create").send({});
+      expect(res.status).toBe(400);
+      expect(res.body).toHaveProperty("error", "Validation failed");
+    });
+
+    it("returns 400 for invalid borrowerAddress", async () => {
+      const res = await request(app).post("/api/loan/create").send({
+        borrowerAddress: "INVALID",
+        collateralId,
+        requestedAmount: 100000,
+      });
+      expect(res.status).toBe(400);
+      expect(res.body).toHaveProperty("error", "Validation failed");
+    });
+
+    it("returns 400 for non-positive requestedAmount", async () => {
+      const res = await request(app).post("/api/loan/create").send({
+        borrowerAddress: VALID_ADDRESS,
+        collateralId,
+        requestedAmount: 0,
+      });
+      expect(res.status).toBe(400);
+      expect(res.body).toHaveProperty("error", "Validation failed");
+    });
+
+    it("returns 404 when collateral does not exist", async () => {
+      const res = await request(app).post("/api/loan/create").send({
+        borrowerAddress: VALID_ADDRESS,
+        collateralId: "nonexistent-id",
+        requestedAmount: 100000,
+      });
+      expect(res.status).toBe(404);
+      expect(res.body).toHaveProperty("error", "Collateral not found");
+    });
+
+    it("returns 409 when collateral is already pledged", async () => {
+      insertLoan({
+        id: `existing-loan-${Date.now()}`,
+        borrower: VALID_ADDRESS,
+        collateral_id: collateralId,
+        amount: 500000,
+      });
+      const res = await request(app).post("/api/loan/create").send({
+        borrowerAddress: VALID_ADDRESS,
+        collateralId,
+        requestedAmount: 100000,
+      });
+      expect(res.status).toBe(409);
+      expect(res.body).toHaveProperty("error", "Collateral is already pledged to another loan");
   describe("CORS middleware", () => {
     const FRONTEND = "http://localhost:3000";
 

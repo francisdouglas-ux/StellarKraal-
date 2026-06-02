@@ -110,6 +110,8 @@ describe("LoanForm", () => {
     fireEvent.click(screen.getByText("Register & Continue"));
 
     await waitFor(() => screen.getByText("2. Request Loan"));
+    fireEvent.change(screen.getByPlaceholderText("Collateral ID"), { target: { value: "1" } });
+    fireEvent.change(screen.getByPlaceholderText("Loan amount (stroops)"), { target: { value: "5000" } });
     fireEvent.click(screen.getByText("Request Loan"));
 
     await waitFor(() =>

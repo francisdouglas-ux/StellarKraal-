@@ -4,8 +4,47 @@ module.exports = {
   darkMode: "class",
   theme: {
     extend: {
+      // ── Typography scale (#298) ──────────────────────────────────────────────
+      fontSize: {
+        "heading-1": ["2.25rem", { lineHeight: "2.5rem", fontWeight: "700" }],
+        "heading-2": ["1.875rem", { lineHeight: "2.25rem", fontWeight: "700" }],
+        "heading-3": ["1.5rem", { lineHeight: "2rem", fontWeight: "600" }],
+        "heading-4": ["1.25rem", { lineHeight: "1.75rem", fontWeight: "600" }],
+        "body-lg": ["1.125rem", { lineHeight: "1.75rem", fontWeight: "400" }],
+        body: ["1rem", { lineHeight: "1.5rem", fontWeight: "400" }],
+        "body-sm": ["0.875rem", { lineHeight: "1.25rem", fontWeight: "400" }],
+        caption: ["0.75rem", { lineHeight: "1rem", fontWeight: "400" }],
+        label: ["0.875rem", { lineHeight: "1.25rem", fontWeight: "500" }],
+      },
       colors: {
-        // WCAG AA compliant color palette
+        // ── Semantic design tokens (#297) ────────────────────────────────────
+        // Referenced via CSS custom properties so dark mode flips automatically.
+        "color-primary":          "var(--token-primary)",
+        "color-primary-hover":    "var(--token-primary-hover)",
+        "color-on-primary":       "var(--token-on-primary)",
+        "color-secondary":        "var(--token-secondary)",
+        "color-secondary-hover":  "var(--token-secondary-hover)",
+        "color-on-secondary":     "var(--token-on-secondary)",
+        "color-accent":           "var(--token-accent)",
+        "color-danger":           "var(--token-danger)",
+        "color-danger-subtle":    "var(--token-danger-subtle)",
+        "color-on-danger":        "var(--token-on-danger)",
+        "color-success":          "var(--token-success)",
+        "color-success-subtle":   "var(--token-success-subtle)",
+        "color-on-success":       "var(--token-on-success)",
+        "color-warning":          "var(--token-warning)",
+        "color-warning-subtle":   "var(--token-warning-subtle)",
+        "color-on-warning":       "var(--token-on-warning)",
+        "color-surface":          "var(--token-surface)",
+        "color-surface-raised":   "var(--token-surface-raised)",
+        "color-text":             "var(--token-text)",
+        "color-text-subtle":      "var(--token-text-subtle)",
+        "color-text-muted":       "var(--token-text-muted)",
+        "color-text-inverse":     "var(--token-text-inverse)",
+        "color-border":           "var(--token-border)",
+        "color-border-strong":    "var(--token-border-strong)",
+
+        // WCAG AA compliant descriptive palette (kept for backward compat)
         brown: {
           50: "#FDF8F3",
           100: "#F9EFE1", 

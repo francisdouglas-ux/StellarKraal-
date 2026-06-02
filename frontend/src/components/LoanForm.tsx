@@ -15,6 +15,49 @@ interface Props {
 const ANIMAL_TYPES = ['cattle', 'goat', 'sheep'];
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
+// ── Validation rules ────────────────────────────────────────────────────────
+
+function validateCount(v: string): string | null {
+  if (!v.trim()) return "Count is required.";
+  const n = Number(v);
+  if (!Number.isInteger(n) || n < 1) return "Count must be a whole number of at least 1.";
+  if (n > 10_000) return "Count cannot exceed 10,000.";
+  return null;
+}
+
+function validateAppraisedValue(v: string): string | null {
+  if (!v.trim()) return "Appraised value is required.";
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return "Appraised value must be a positive number.";
+  if (!Number.isInteger(n)) return "Appraised value must be a whole number of stroops.";
+  return null;
+}
+
+function validateCollateralId(v: string): string | null {
+  if (!v.trim()) return "Collateral ID is required.";
+  const n = Number(v);
+  if (!Number.isInteger(n) || n < 1) return "Collateral ID must be a positive integer.";
+  return null;
+}
+
+function validateLoanAmount(v: string): string | null {
+  if (!v.trim()) return "Loan amount is required.";
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return "Loan amount must be a positive number.";
+  if (!Number.isInteger(n)) return "Loan amount must be a whole number of stroops.";
+  if (n < 1_000) return "Loan amount must be at least 1,000 stroops.";
+  return null;
+}
+
+// ── Field error display ──────────────────────────────────────────────────────
+
+function FieldError({ msg }: { msg: string | null }) {
+  if (!msg) return null;
+  return <p className="text-red-600 text-xs mt-1" role="alert">{msg}</p>;
+}
+
+// ── Component ────────────────────────────────────────────────────────────────
+
 export default function LoanForm({ walletAddress, initialCollateralId }: Props) {
   const [step, setStep] = useState<'collateral' | 'loan'>(
     initialCollateralId ? 'loan' : 'collateral'
@@ -27,7 +70,34 @@ export default function LoanForm({ walletAddress, initialCollateralId }: Props) 
   const [loading, setLoading] = useState(false);
   const toast = useToast();
 
+  // ── Derived errors ──────────────────────────────────────────────────────────
+
+  const collateralErrors = {
+    count: validateCount(count),
+    appraisedValue: validateAppraisedValue(appraisedValue),
+  };
+  const loanErrors = {
+    collateralId: validateCollateralId(collateralId),
+    loanAmount: validateLoanAmount(loanAmount),
+  };
+
+  const collateralHasErrors = Object.values(collateralErrors).some(Boolean);
+  const loanHasErrors = Object.values(loanErrors).some(Boolean);
+
+  function touch(field: string) {
+    setTouched((prev) => ({ ...prev, [field]: true }));
+  }
+
+  function touchAll(fields: string[]) {
+    setTouched((prev) => Object.fromEntries([...Object.entries(prev), ...fields.map((f) => [f, true])]));
+  }
+
+  // ── Handlers ────────────────────────────────────────────────────────────────
+
   async function registerCollateral() {
+    touchAll(["count", "appraisedValue"]);
+    if (collateralHasErrors) return;
+
     setLoading(true);
     try {
       const res = await fetch(`${API}/api/collateral/register`, {
@@ -59,6 +129,9 @@ export default function LoanForm({ walletAddress, initialCollateralId }: Props) 
   }
 
   async function requestLoan() {
+    touchAll(["collateralId", "loanAmount"]);
+    if (loanHasErrors) return;
+
     setLoading(true);
     try {
       const res = await fetch(`${API}/api/loan/request`, {

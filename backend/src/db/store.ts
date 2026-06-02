@@ -7,14 +7,23 @@
  * In production, replace with actual database queries.
  */
 
+export interface AppraisalEntry {
+  date: string;
+  value: number;
+}
 export type CollateralStatus = "available" | "pledged" | "liquidated";
 
 export interface CollateralRecord {
   id: string;
   owner: string;
   animal_type: string;
+  breed?: string;
+  age_years?: number;
+  weight_kg?: number;
+  photo_url?: string;
   count: number;
   appraised_value: number;
+  appraisal_history: AppraisalEntry[];
   species?: string;
   breed?: string;
   age?: number;
@@ -59,6 +68,13 @@ const transactionTable: Map<string, TransactionRecord> = new Map();
 
 // ── Collateral ────────────────────────────────────────────────────────────────
 
+export function insertCollateral(data: Omit<CollateralRecord, "createdAt" | "deletedAt" | "appraisal_history">): CollateralRecord {
+  const record: CollateralRecord = {
+    ...data,
+    appraisal_history: [{ date: new Date().toISOString(), value: data.appraised_value }],
+    createdAt: new Date().toISOString(),
+    deletedAt: null,
+  };
 /**
  * Insert a new collateral record into the in-memory store.
  * @param data - Collateral fields excluding auto-generated timestamps.
@@ -72,6 +88,16 @@ export function insertCollateral(data: Omit<CollateralRecord, "createdAt" | "del
   return record;
 }
 
+export function addAppraisal(id: string, value: number): boolean {
+  const r = collateralTable.get(id);
+  if (!r || r.deletedAt !== null) return false;
+  r.appraised_value = value;
+  r.appraisal_history.push({ date: new Date().toISOString(), value });
+  return true;
+}
+
+export function listCollateral(): CollateralRecord[] {
+  return [...collateralTable.values()].filter((r) => r.deletedAt === null);
 /**
  * Return non-deleted collateral records with optional filtering and pagination.
  * @param filters - Optional filter and pagination options.
@@ -268,6 +294,14 @@ export function listDeletedLoans(): LoanRecord[] {
   return [...loanTable.values()].filter((r) => r.deletedAt !== null);
 }
 
+/** Returns true if the collateral is already pledged to an active (non-deleted) loan. */
+export function isCollateralPledged(collateralId: string): boolean {
+  return [...loanTable.values()].some(
+    (r) => r.collateral_id === collateralId && r.deletedAt === null,
+  );
+}
+
+// ── Migration helper (documents schema intent) ────────────────────────────────
 /**
  * Check if a collateral record is currently pledged to an active loan.
  * @param collateralId - Collateral record ID.

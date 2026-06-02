@@ -1,9 +1,9 @@
-'use client';
-import { useState } from 'react';
-import { colors } from '@/lib/design-tokens';
-import Card from '@/components/Card';
-import Spinner from '@/components/Spinner';
-import ErrorState from '@/components/ErrorState';
+"use client";
+import { useState } from "react";
+import Link from "next/link";
+import { colors } from "@/lib/design-tokens";
+import Card from "@/components/Card";
+import Spinner from "@/components/Spinner";
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
@@ -61,7 +61,14 @@ export default function CollateralCard(_props: { walletAddress: string }) {
           )}
         </button>
       </div>
-      {error && <ErrorState message={error} onRetry={lookup} />}
+      {collateralId && (
+        <Link
+          href={`/collateral/${collateralId}`}
+          className="mt-3 inline-block text-sm text-gold hover:underline"
+        >
+          View collateral detail →
+        </Link>
+      )}
       {data && (
         <pre
           className={`mt-4 ${colors.background.secondary} rounded-lg p-3 text-xs overflow-auto ${colors.text.primary}`}

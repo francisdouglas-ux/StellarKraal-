@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { signTransaction } from "@/lib/freighterClient";
 import { submitSignedXdr } from "@/lib/stellarUtils";
+import Tooltip from "@/components/Tooltip";
 import { colors } from "@/lib/design-tokens";
 import Card from "@/components/Card";
 import Spinner from "@/components/Spinner";
@@ -73,6 +74,15 @@ export default function RepayPanel({ walletAddress }: Props) {
           onChange={(e) => setAmount(e.target.value)}
           type="number"
         />
+        <Tooltip hint="R — Repay loan">
+          <button
+            onClick={repay}
+            disabled={loading}
+            className="w-full bg-gold text-brown py-2.5 rounded-xl font-semibold hover:bg-gold/80 transition disabled:opacity-50"
+          >
+            {loading ? "Processing…" : "Repay"}
+          </button>
+        </Tooltip>
         <button
           onClick={repay}
           disabled={loading}

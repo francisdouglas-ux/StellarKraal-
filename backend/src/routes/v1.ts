@@ -21,6 +21,11 @@ import { stellarPublicKeySchema } from "../validators/stellar";
 import { registerWebhook, getWebhooks, getDeliveryLogs, fireWebhooks } from "../webhooks";
 import { timeoutMiddleware } from "../middleware/timeout";
 import { writeLimiter } from "../middleware/rateLimit";
+import { getCollateral } from "../db/store";
+
+const { Server } = SorobanRpc;
+
+const RPC_URL = process.env.RPC_URL || "https://soroban-testnet.stellar.org";
 import { fireAlert } from "../utils/alerting";
 import { rules } from "../utils/alertRules";
 import rpcClient from "../utils/rpcClient";
@@ -279,6 +284,14 @@ v1Router.get("/health/:loanId", async (req: Request, res: Response, next: NextFu
   }
 });
 
+// GET /collateral/:id
+v1Router.get("/collateral/:id", (req: Request, res: Response) => {
+  const record = getCollateral(req.params.id);
+  if (!record) {
+    return res.status(404).json({ error: "Collateral not found" });
+  }
+  res.json(record);
+});
 // GET /loans - List loans with filtering and pagination
 v1Router.get("/loans", asyncHandler(async (req: Request, res: Response) => {
   const pageRaw = req.query.page !== undefined ? Number(req.query.page) : 1;
