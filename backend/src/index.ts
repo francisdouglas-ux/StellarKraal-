@@ -658,6 +658,24 @@ app.get(
   }),
 );
 
+// GET /api/borrowers/:wallet — aggregate borrower profile (settings + collateral + loans)
+app.get(
+  "/api/borrowers/:wallet",
+  readLimiter,
+  asyncHandler(async (req: Request, res: Response) => {
+    const wallet = req.params.wallet as string;
+
+    const collateralResult = listCollateral({ ownerId: wallet, page: 1, limit: 100 });
+    const loansResult = listLoans({ borrowerAddress: wallet, page: 1, limit: 100 });
+
+    res.json({
+      wallet,
+      collateral: collateralResult.data,
+      loans: loansResult.data,
+    });
+  }),
+);
+
 // GET /api/collateral — paginated, filterable collateral listing
 const collateralQuerySchema = z.object({
   page: z.coerce.number().int().positive().optional().default(1),

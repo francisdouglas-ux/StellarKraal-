@@ -74,6 +74,13 @@ export default function RootLayout({
                 FAQ
               </Link>
               <Link
+                href="/profile"
+                className="hover:opacity-100 transition"
+                style={{ color: "var(--color-text-muted)" }}
+              >
+                Profile
+              </Link>
+              <Link
                 href="/settings"
                 className="hover:opacity-100 transition"
                 style={{ color: "var(--color-text-muted)" }}
