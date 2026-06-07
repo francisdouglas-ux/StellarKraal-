@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { healthColor } from '@/lib/design-tokens';
 
 interface DataPoint {
@@ -24,33 +24,86 @@ function formatDate(iso: string) {
 
 function HistoryChart({ history }: { history: DataPoint[] }) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const circleRefs = useRef<Array<SVGCircleElement | null>>([]);
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
+  const [activeIndex, setActiveIndex] = useState<number | null>(null);
 
   const max = Math.max(...history.map((p) => p.value), 20_000);
   const W = 100; // percentage-based viewport
+  const TW = 144;
 
-  function show(e: React.MouseEvent | React.TouchEvent, point: DataPoint, idx: number) {
+  function hideTooltip() {
+    setTooltip(null);
+    setActiveIndex(null);
+  }
+
+  function showTooltipForIndex(index: number) {
+    const container = containerRef.current;
+    const point = history[index];
+    if (!container || !point) return;
+
+    const rect = container.getBoundingClientRect();
+    const width = rect.width || 1;
+    const px = (index / (history.length - 1 || 1)) * W;
+    const x = Math.min(Math.max((px / W) * width, TW / 2), width - TW / 2);
+    const y = 16;
+
+    setTooltip({ x, y, point });
+    setActiveIndex(index);
+  }
+
+  function show(e: React.MouseEvent<SVGCircleElement> | React.TouchEvent<SVGCircleElement>, point: DataPoint, idx: number) {
     const container = containerRef.current;
     if (!container) return;
     const rect = container.getBoundingClientRect();
     const clientX = "touches" in e ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
     const clientY = "touches" in e ? e.touches[0].clientY : (e as React.MouseEvent).clientY;
 
-    // raw position relative to container
     let x = clientX - rect.left;
     let y = clientY - rect.top;
 
-    // clamp tooltip so it never overflows container (tooltip ~140×64px)
-    const TW = 144, TH = 68;
     x = Math.min(Math.max(x, TW / 2), rect.width - TW / 2);
-    y = y < TH + 8 ? y + 12 : y - TH - 8;
+    y = y < 68 + 8 ? y + 12 : y - 68 - 8;
 
     setTooltip({ x, y, point });
+    setActiveIndex(idx);
+  }
+
+  function focusPoint(index: number) {
+    const target = circleRefs.current[index];
+    if (target) target.focus();
+  }
+
+  function handlePointKeyDown(event: React.KeyboardEvent<SVGCircleElement>, index: number) {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      showTooltipForIndex(index);
+      return;
+    }
+
+    if (event.key === "Escape") {
+      hideTooltip();
+      return;
+    }
+
+    if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const prev = index - 1;
+      if (prev >= 0) focusPoint(prev);
+      return;
+    }
+
+    if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+      event.preventDefault();
+      const next = index + 1;
+      if (next < history.length) focusPoint(next);
+      return;
+    }
   }
 
   return (
-    <div ref={containerRef} className="relative mt-4 h-28 select-none" onMouseLeave={() => setTooltip(null)}>
-      <svg viewBox={`0 0 ${W} 100`} preserveAspectRatio="none" className="w-full h-full" aria-label="Health factor history chart">
+    <div ref={containerRef} className="relative mt-4 h-28 select-none" onMouseLeave={hideTooltip}>
+      <svg viewBox={`0 0 ${W} 100`} preserveAspectRatio="none" className="w-full h-full" aria-label="Health factor history chart" role="img">
         {/* baseline */}
         <line x1="0" y1="50" x2={W} y2="50" stroke="#4A2C0A" strokeOpacity="0.08" strokeWidth="0.5" />
 
@@ -74,10 +127,16 @@ function HistoryChart({ history }: { history: DataPoint[] }) {
           const px = (i / (history.length - 1 || 1)) * W;
           const py = 100 - (point.value / max) * 90;
           const color = healthColor(point.value);
-          const isActive = tooltip?.point === point;
+          const isActive = activeIndex === i;
           return (
             <circle
               key={i}
+              ref={(el) => {
+                circleRefs.current[i] = el;
+              }}
+              tabIndex={0}
+              role="button"
+              aria-label={`${formatDate(point.date)} health ${(point.value / 10_000).toFixed(2)}x, ${point.value.toLocaleString()} bps`}
               cx={px}
               cy={py}
               r={isActive ? 3 : 2}
@@ -86,8 +145,14 @@ function HistoryChart({ history }: { history: DataPoint[] }) {
               strokeWidth={isActive ? 0 : 0.8}
               style={{ cursor: "pointer", transition: "r 0.15s" }}
               onMouseEnter={(e) => show(e, point, i)}
-              onTouchStart={(e) => { e.preventDefault(); show(e, point, i); }}
-              onTouchEnd={() => setTimeout(() => setTooltip(null), 2000)}
+              onTouchStart={(e) => {
+                e.preventDefault();
+                show(e, point, i);
+              }}
+              onTouchEnd={() => setTimeout(() => hideTooltip(), 2000)}
+              onFocus={() => showTooltipForIndex(i)}
+              onBlur={hideTooltip}
+              onKeyDown={(e) => handlePointKeyDown(e, i)}
             />
           );
         })}
@@ -106,8 +171,12 @@ function HistoryChart({ history }: { history: DataPoint[] }) {
           role="tooltip"
         >
           <p className="font-semibold">{formatDate(tooltip.point.date)}</p>
-          <p>Health: <span className="font-mono">{(tooltip.point.value / 10_000).toFixed(2)}x</span></p>
-          <p>Value: <span className="font-mono">{tooltip.point.value.toLocaleString()} bps</span></p>
+          <p>
+            Health: <span className="font-mono">{(tooltip.point.value / 10_000).toFixed(2)}x</span>
+          </p>
+          <p>
+            Value: <span className="font-mono">{tooltip.point.value.toLocaleString()} bps</span>
+          </p>
         </div>
       )}
     </div>

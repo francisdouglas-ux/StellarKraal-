@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import HealthGauge from '../components/HealthGauge';
 
 jest.mock('../lib/design-tokens', () => ({
@@ -37,5 +37,41 @@ describe('HealthGauge', () => {
     render(<HealthGauge value={13_333} />);
     const el = screen.getByRole('status');
     expect(el.getAttribute('aria-label')).toMatch(/1\.33x/);
+  });
+
+  it('allows keyboard navigation between chart points and shows tooltip', () => {
+    render(
+      <HealthGauge
+        value={10000}
+        history={[
+          { date: '2026-01-01', value: 8000 },
+          { date: '2026-02-01', value: 11000 },
+        ]}
+      />,
+    );
+
+    const points = screen.getAllByRole('button');
+    expect(points).toHaveLength(2);
+
+    act(() => {
+      points[0].focus();
+    });
+    expect(points[0]).toHaveFocus();
+
+    act(() => {
+      fireEvent.keyDown(points[0], { key: 'ArrowRight', code: 'ArrowRight' });
+    });
+    expect(points[1]).toHaveFocus();
+
+    act(() => {
+      fireEvent.keyDown(points[1], { key: 'Enter', code: 'Enter' });
+    });
+    expect(screen.getByText('Health:')).toBeTruthy();
+    expect(screen.getByText('1.10x')).toBeTruthy();
+
+    act(() => {
+      fireEvent.keyDown(points[1], { key: 'Escape', code: 'Escape' });
+    });
+    expect(screen.queryByText('Health:')).toBeNull();
   });
 });
