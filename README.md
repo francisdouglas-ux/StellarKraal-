@@ -5,6 +5,9 @@
 [![Coverage](https://img.shields.io/badge/coverage-70%25%20min-brightgreen)](https://github.com/teslims2/StellarKraal-/actions)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
+<img width="1696" height="1034" alt="kraal" src="https://github.com/user-attachments/assets/7879ee2d-c347-42f6-92b0-1d7f0345bdf7" />
+
+
 ## Project Overview
 
 StellarKraal enables livestock-backed loans on the Stellar network. Animals are registered as collateral and borrowers can request loans against their appraised value, with on-chain loan lifecycle management and liquidation protection.
