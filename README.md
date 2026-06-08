@@ -5,7 +5,7 @@
 [![Coverage](https://img.shields.io/badge/coverage-70%25%20min-brightgreen)](https://github.com/teslims2/StellarKraal-/actions)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-<img width="1696" height="1034" alt="kraal" src="https://github.com/user-attachments/assets/7879ee2d-c347-42f6-92b0-1d7f0345bdf7" />
+
 
 <img width="1920" height="1080" alt="Screenshot from 2026-06-08 19-30-10" src="https://github.com/user-attachments/assets/c7d2183f-9971-47f0-8391-d14488a69ff0" />
 
