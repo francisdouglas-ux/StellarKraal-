@@ -29,6 +29,7 @@ import { corsMiddleware } from "./middleware/cors";
 import { correlationMiddleware } from "./middleware/correlation";
 import { loggingMiddleware } from "./middleware/logging";
 import { requestIdMiddleware } from "./middleware/requestId";
+import { getIdempotencyEntry, setIdempotencyEntry } from "./middleware/idempotency";
 import {
   Networks,
   TransactionBuilder,
@@ -84,27 +85,6 @@ function track5xx() {
       window: "60s",
     });
   }
-}
-
-// ── Idempotency cache (in-memory, 24h TTL) ───────────────────────────────────
-interface IdempotencyEntry {
-  status: number;
-  body: unknown;
-  createdAt: number;
-}
-const idempotencyCache = new Map<string, IdempotencyEntry>();
-const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
-function getIdempotencyEntry(key: string): IdempotencyEntry | undefined {
-  const entry = idempotencyCache.get(key);
-  if (!entry) return undefined;
-  if (Date.now() - entry.createdAt > IDEMPOTENCY_TTL_MS) {
-    idempotencyCache.delete(key);
-    return undefined;
-  }
-  return entry;
-}
-function setIdempotencyEntry(key: string, status: number, body: unknown): void {
-  idempotencyCache.set(key, { status, body, createdAt: Date.now() });
 }
 
 const CONTRACT_ID = process.env.CONTRACT_ID || "";

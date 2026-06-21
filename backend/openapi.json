@@ -188,7 +188,16 @@
         "parameters": [{ "name": "Idempotency-Key", "in": "header", "required": true, "schema": { "type": "string" }, "description": "Client-generated unique key for idempotent replay" }],
         "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/LoanRepayBody" } } } },
         "responses": {
-          "200": { "description": "Unsigned XDR transaction", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/XdrResponse" } } } },
+          "200": {
+            "description": "Unsigned XDR transaction",
+            "headers": {
+              "X-Idempotent-Replayed": {
+                "schema": { "type": "string", "enum": ["true"] },
+                "description": "Present with value `true` when the response was served from the idempotency cache"
+              }
+            },
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/XdrResponse" } } }
+          },
           "400": { "$ref": "#/components/responses/ValidationError" },
           "401": { "$ref": "#/components/responses/Unauthorized" },
           "429": { "$ref": "#/components/responses/RateLimited" },
