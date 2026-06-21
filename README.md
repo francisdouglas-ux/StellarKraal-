@@ -173,6 +173,7 @@ npm run test:frontend
 
 | Document | Description |
 |---|---|
+| [Loan State Machine](docs/protocol/loan-state-machine.md) | All loan states, valid transitions, triggering events, and on-chain event mapping |
 | [Liquidation Mechanism](docs/protocol/liquidation.md) | Health factor formula, liquidation threshold, partial liquidation examples |
 
 ## Architecture Decision Records
