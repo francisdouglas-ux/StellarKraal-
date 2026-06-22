@@ -7,7 +7,6 @@ import {
   insertCollateral,
   insertLoan,
   insertTransaction,
-  listCollateral,
   getCollateral,
   listLoans,
   getTransaction,

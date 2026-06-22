@@ -20,7 +20,7 @@ afterEach(() => {
   jest.useRealTimers();
 });
 
-function sign(payload: string, secret: string): string {
+function _sign(payload: string, secret: string): string {
   return "sha256=" + crypto.createHmac("sha256", secret).update(payload).digest("hex");
 }
 

@@ -4,6 +4,8 @@ import logger from "../utils/logger";
 /**
  * Creates a request timeout middleware.
  * Returns 504 Gateway Timeout if the request exceeds the given duration.
+ * @param ms - Timeout duration in milliseconds.
+ * @returns Express middleware function that enforces the timeout.
  */
 export function timeoutMiddleware(ms: number) {
   return (req: Request, res: Response, next: NextFunction): void => {
@@ -31,9 +33,8 @@ export function timeoutMiddleware(ms: number) {
         timeoutMs: ms,
       });
 
-      res.status(503).json({
-        error: "Service Unavailable",
-        message: "Request exceeded the maximum allowed time of 10 seconds",
+      res.status(504).json({
+        error: "Request timeout",
       });
     }, ms);
 

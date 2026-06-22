@@ -44,6 +44,14 @@ jest.mock("@stellar/stellar-sdk", () => {
         getHealth: jest.fn().mockResolvedValue({ status: "healthy" }),
       })),
     },
+    rpc: {
+      Server: jest.fn().mockImplementation(() => ({
+        getAccount: jest.fn().mockResolvedValue({ id: "GABC", sequence: "1" }),
+        prepareTransaction: jest.fn().mockResolvedValue({ toXDR: () => "prepared_xdr" }),
+        simulateTransaction: jest.fn().mockResolvedValue({ result: { retval: {} } }),
+        getHealth: jest.fn().mockResolvedValue({ status: "healthy" }),
+      })),
+    },
   };
 });
 
@@ -141,7 +149,6 @@ describe("GET /api/v1/collateral", () => {
   });
 
   it("filters by owner", async () => {
-    const other = "GBVZQ4YWKGZQHKJQKJQKJQKJQKJQKJQKJQKJQKJQKJQKJQKJQKJQKJQ";
     // Create one with a different owner — use VALID_OWNER since other may be invalid
     await createCollateral({ animal_type: "goats" });
     const res = await request(app).get(`/api/v1/collateral?owner=${VALID_OWNER}`);

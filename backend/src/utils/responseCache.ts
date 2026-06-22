@@ -18,7 +18,11 @@ function isExpired(entry: CacheEntry): boolean {
   return Date.now() - entry.cachedAt > CACHE_TTL_MS;
 }
 
-/** Middleware that caches GET responses for 30 s and respects Cache-Control: no-cache. */
+/** Middleware that caches GET responses for 30 s and respects Cache-Control: no-cache.
+ * @param req - Express request object.
+ * @param res - Express response object.
+ * @param next - Next middleware callback.
+ */
 export function responseCacheMiddleware(req: Request, res: Response, next: NextFunction): void {
   const noCache =
     req.headers["cache-control"] === "no-cache" ||
@@ -50,7 +54,9 @@ export function responseCacheMiddleware(req: Request, res: Response, next: NextF
   next();
 }
 
-/** Invalidate all cache entries whose path matches the given prefix. */
+/** Invalidate all cache entries whose path matches the given prefix.
+ * @param pathPrefix - The URL path prefix to match for invalidation.
+ */
 export function invalidateCache(pathPrefix: string): void {
   let count = 0;
   for (const key of store.keys()) {

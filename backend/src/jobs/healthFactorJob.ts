@@ -1,4 +1,4 @@
-import cron from "node-cron";
+import cron, { ScheduledTask } from "node-cron";
 import { listActiveLoans, getCollateral, updateLoan } from "../db/store";
 import logger from "../utils/logger";
 
@@ -9,6 +9,9 @@ const SCALE = 10_000;
  * Compute health factor (scaled by 10_000) for a loan.
  * HF = (collateral_value × liq_threshold_bps) / (outstanding × 10_000) × 10_000
  * Returns null when collateral is missing or outstanding is zero.
+ * @param collateralValue - Current appraised value of the collateral.
+ * @param outstanding - Outstanding loan amount.
+ * @returns The health factor scaled by 10,000, or null if inputs are invalid.
  */
 export function computeHealthFactor(collateralValue: number, outstanding: number): number | null {
   if (outstanding <= 0 || collateralValue <= 0) return null;
@@ -18,6 +21,7 @@ export function computeHealthFactor(collateralValue: number, outstanding: number
 /**
  * Recalculate health factors for all active/at_risk loans and flag those below 1.0.
  * Returns the count of records updated.
+ * @returns The number of loan records updated.
  */
 export async function runHealthFactorJob(): Promise<number> {
   const start = Date.now();
@@ -46,8 +50,9 @@ export async function runHealthFactorJob(): Promise<number> {
 /**
  * Schedule the health factor job to run every hour.
  * Returns the scheduled task so the caller can stop it on shutdown.
+ * @returns The scheduled cron task instance.
  */
-export function scheduleHealthFactorJob(): cron.ScheduledTask {
+export function scheduleHealthFactorJob(): ScheduledTask {
   return cron.schedule("0 * * * *", async () => {
     try {
       await runHealthFactorJob();

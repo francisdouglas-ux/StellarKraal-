@@ -1,5 +1,5 @@
 import request from "supertest";
-import express, { Request, Response, NextFunction } from "express";
+import express, { Request, Response } from "express";
 import { timeoutMiddleware } from "../middleware/timeout";
 
 describe("Request Timeout Integration", () => {
