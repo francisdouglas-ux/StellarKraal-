@@ -1,0 +1,46 @@
+name: Contract Fuzzing
+
+on:
+  pull_request:
+    paths:
+      - "contracts/**"
+
+jobs:
+  fuzz:
+    name: cargo-fuzz (60s per target)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install nightly Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          profile: minimal
+          override: true
+
+      - name: Cache cargo-fuzz binary
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-fuzz
+          key: cargo-fuzz-bin
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked || true
+
+      - name: Fuzz health_factor (60s)
+        working-directory: contracts/stellarkraal
+        run: cargo +nightly fuzz run health_factor -- -max_total_time=60
+
+      - name: Fuzz loan_request (60s)
+        working-directory: contracts/stellarkraal
+        run: cargo +nightly fuzz run loan_request -- -max_total_time=60
+
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-artifacts
+          path: contracts/stellarkraal/fuzz/artifacts/
+          if-no-files-found: ignore

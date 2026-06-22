@@ -2,231 +2,162 @@
 
 ## Overview
 
-Fuzz testing is a software testing technique that provides random or semi-random data as input to a program to discover edge cases and potential vulnerabilities. The StellarKraal smart contract uses `proptest` for property-based fuzz testing of critical arithmetic functions.
+Fuzz testing feeds random or semi-random inputs into a program to discover edge
+cases and arithmetic bugs that hand-written tests miss. The StellarKraal smart
+contract is fuzzed with [`cargo-fuzz`](https://github.com/rust-fuzz/cargo-fuzz)
+(libFuzzer) to machine-verify the protocol's critical financial invariants.
+
+The fuzz harness lives in [`contracts/stellarkraal/fuzz/`](../../contracts/stellarkraal/fuzz)
+and is a standalone Cargo workspace so it can link the libFuzzer host runtime
+independently of the `#![no_std]` contract crate.
+
+> **Complementary property tests:** `contracts/stellarkraal/src/tests.rs` also
+> contains `proptest`-based property tests (`prop_*`) that exercise the live
+> contract through its client. The `cargo-fuzz` targets documented here focus on
+> the pure arithmetic invariants and run under a dedicated time-limited CI job.
 
 ## Why Fuzz Testing?
 
-Arithmetic functions in the contract (interest calculation, health factor, collateral valuation) are difficult to test exhaustively with hand-written unit tests. Fuzz testing generates thousands of random inputs to verify that invariants hold across the entire input space.
+The contract's arithmetic (health factor, LTV cap, origination/interest fees) is
+hard to test exhaustively by hand. libFuzzer generates millions of inputs per
+run and shrinks any failing case to a minimal reproducer, so invariants are
+verified across the whole input space rather than at a handful of chosen points.
 
 ## Setup
 
-### Dependencies
+### Prerequisites
 
-The project uses `proptest` for property-based testing:
+- A **nightly** Rust toolchain (libFuzzer requires nightly).
+- `cargo-fuzz`:
 
-```toml
-[dev-dependencies]
-proptest = { version = "1.1.0", default-features = false, features = ["alloc"] }
-```
+  ```bash
+  cargo install cargo-fuzz --locked
+  ```
 
-### Running Fuzz Tests
+`cargo-fuzz` is a CLI tool, not a crate dependency. The harness itself depends
+only on `libfuzzer-sys` and `arbitrary` (declared in
+`contracts/stellarkraal/fuzz/Cargo.toml`).
 
-Run all fuzz tests:
+### Running the fuzz targets
 
-```bash
-cd contracts/stellarkraal
-cargo test --test '*' -- --nocapture
-```
-
-Run specific fuzz test:
+All commands run from `contracts/stellarkraal/` (the directory that contains the
+`fuzz/` sub-crate):
 
 ```bash
-cargo test fuzz_interest_calculation_bounded -- --nocapture
+# List available targets
+cargo +nightly fuzz list
+
+# Run a target until you stop it (Ctrl-C)
+cargo +nightly fuzz run health_factor
+cargo +nightly fuzz run loan_request
+
+# Run a target for a bounded time (matches CI: 60 seconds)
+cargo +nightly fuzz run health_factor -- -max_total_time=60
 ```
 
-Run fuzz tests with increased iterations (default is 256):
+## Fuzz Targets
 
-```bash
-PROPTEST_CASES=1000000 cargo test fuzz_
-```
+### 1. `health_factor`
 
-## Fuzz Tests
+**File:** `fuzz/fuzz_targets/health_factor.rs`
+**Mirrors:** `StellarKraal::compute_health_factor_with_thr` in `src/lib.rs`
+**Formula:** `(collateral * liq_threshold_bps) / (outstanding * 10_000) * 10_000`
 
-### 1. Interest Calculation Bounded
+**Inputs (arbitrary):**
 
-**Test**: `fuzz_interest_calculation_bounded`  
-**Invariant**: Interest fee never exceeds interest portion  
-**Inputs**: 
-- `principal`: 1 to 1 billion
-- `interest_portion`: 0 to 100 million
-- `fee_bps`: 0 to 10,000 basis points
+- `total_collateral_value`: any `i128`
+- `outstanding`: any `i128`
+- `liq_threshold_bps`: constrained to the contract's valid `1..=10_000` range
 
-**Verification**:
-- `interest_fee <= interest_portion`
-- `interest_fee >= 0`
+**Invariants asserted:**
 
-### 2. Health Factor Positive
+- The health factor is never negative.
+- A fully-repaid loan (`outstanding == 0`) is maximally healthy (`i128::MAX`).
+- The liquidation predicate (`health < 1.0`, i.e. `< 10_000`) is total — every
+  input the contract would accept yields a defined, non-panicking result.
+- No arithmetic overflow occurs (overflowing inputs are rejected via
+  `checked_*`, exactly as the contract does).
 
-**Test**: `fuzz_health_factor_positive`  
-**Invariant**: Health factor is always positive when outstanding > 0  
-**Inputs**:
-- `collateral_value`: 1 to 1 billion
-- `outstanding`: 1 to 1 billion
-- `liq_threshold_bps`: 1 to 10,000 basis points
+### 2. `loan_request`
 
-**Verification**:
-- `health_factor > 0` when `outstanding > 0`
+**File:** `fuzz/fuzz_targets/loan_request.rs`
+**Mirrors:** the amount/fee logic of `StellarKraal::request_loan` in `src/lib.rs`
 
-**Formula**: `health_factor = (collateral_value * liq_threshold_bps) / (outstanding * 10_000) * 10_000`
+**Inputs (arbitrary):**
 
-### 3. Repayment Non-Negative
+- `total_collateral_value`: any `i128`
+- `amount`: any `i128`
+- `ltv_bps`: constrained to `0..=10_000`
+- `orig_fee_bps`: constrained to `0..=500` (the contract's fee cap)
 
-**Test**: `fuzz_repayment_non_negative`  
-**Invariant**: Outstanding never goes negative after repayment  
-**Inputs**:
-- `outstanding`: 1 to 1 billion
-- `repay_amount`: 0 to 1 billion
+**Invariants asserted (for approved loans):**
 
-**Verification**:
-- `new_outstanding >= 0`
-- `new_outstanding <= outstanding`
+- The principal equals the requested amount and is positive.
+- The origination fee is non-negative and never exceeds the principal.
+- The disbursement is non-negative and never exceeds the principal.
+- `fee + disbursement == principal` (no value is created or lost).
+- The approved loan never exceeds the LTV-capped maximum.
 
-### 4. Collateral Valuation Safe
-
-**Test**: `fuzz_collateral_valuation_safe`  
-**Invariant**: Total collateral value doesn't overflow  
-**Inputs**:
-- `collateral_count`: 1 to 1,000
-- `value_per_collateral`: 1 to 1 billion
-
-**Verification**:
-- `total_value >= 0`
-- No overflow occurs
-
-### 5. LTV Calculation Bounded
-
-**Test**: `fuzz_ltv_calculation_bounded`  
-**Invariant**: Max loan never exceeds collateral value  
-**Inputs**:
-- `collateral_value`: 1 to 1 billion
-- `ltv_bps`: 0 to 10,000 basis points
-
-**Verification**:
-- `max_loan <= collateral_value`
-- `max_loan >= 0`
-
-**Formula**: `max_loan = (collateral_value * ltv_bps) / 10_000`
-
-### 6. Origination Fee Safe
-
-**Test**: `fuzz_origination_fee_safe`  
-**Invariant**: Origination fee never exceeds principal  
-**Inputs**:
-- `principal`: 1 to 1 billion
-- `fee_bps`: 0 to 10,000 basis points
-
-**Verification**:
-- `fee <= principal`
-- `fee >= 0`
-- `disbursement >= 0`
-
-### 7. Close Factor Bounded
-
-**Test**: `fuzz_close_factor_bounded`  
-**Invariant**: Max repay amount never exceeds outstanding  
-**Inputs**:
-- `outstanding`: 1 to 1 billion
-- `close_factor_bps`: 1 to 10,000 basis points
-
-**Verification**:
-- `max_repay <= outstanding`
-- `max_repay > 0`
-
-### 8. Multiple Repayments Clear Loan
-
-**Test**: `fuzz_multiple_repayments_clear_loan`  
-**Invariant**: Repeated repayments eventually clear the loan  
-**Inputs**:
-- `initial_outstanding`: 1 to 1 billion
-- `repay_count`: 1 to 100
-
-**Verification**:
-- `outstanding >= 0` after each repayment
-- `outstanding == 0` after sufficient repayments
-
-### 9. Health Factor Extreme Values
-
-**Test**: `fuzz_health_factor_extreme_values`  
-**Invariant**: Health factor calculation handles extreme values without panicking  
-**Inputs**:
-- `collateral_value`: 1 to i128::MAX / 100,000
-- `outstanding`: 1 to i128::MAX / 100,000
-- `liq_threshold_bps`: 1 to 10,000 basis points
-
-**Verification**:
-- Calculation completes without panic
-- No overflow occurs
+Rejected inputs map to the contract's `InvalidAmount` (non-positive amount) and
+`InsufficientCollateral` (amount above the LTV cap) outcomes.
 
 ## CI Integration
 
-Fuzz tests run in CI with the following configuration:
+The [`fuzz.yml`](../../.github/workflows/fuzz.yml) workflow runs on every pull
+request that touches `contracts/**`. It installs `cargo-fuzz`, then runs each
+target for a time-limited 60-second session:
 
 ```yaml
-# .github/workflows/contract-tests.yml
-- name: Run fuzz tests
-  run: |
-    cd contracts/stellarkraal
-    PROPTEST_CASES=1000000 cargo test fuzz_ -- --nocapture
+on:
+  pull_request:
+    paths:
+      - "contracts/**"
+
+# ...
+      - run: cargo +nightly fuzz run health_factor -- -max_total_time=60
+      - run: cargo +nightly fuzz run loan_request -- -max_total_time=60
 ```
 
-**Nightly Schedule**: Fuzz tests run nightly with 1 million iterations to catch rare edge cases.
+If a target crashes, the failing input is uploaded as a build artifact for
+reproduction.
 
-## Corpus
+## Corpus and Artifacts
 
-Proptest maintains a corpus of interesting inputs in `contracts/stellarkraal/proptest-regressions/`. This corpus is committed to the repository to ensure reproducibility of any failures.
+libFuzzer stores interesting inputs under `fuzz/corpus/<target>/` and crash
+reproducers under `fuzz/artifacts/<target>/`. These directories are
+git-ignored. To reproduce a saved crash locally:
+
+```bash
+cargo +nightly fuzz run health_factor fuzz/artifacts/health_factor/<crash-file>
+```
 
 ## Interpreting Results
 
-### Passing Tests
+### Passing
 
-All invariants held across all generated inputs. The arithmetic functions are safe.
+A run that finishes its time budget (or that you stop manually) without printing
+a crash means every generated input satisfied the asserted invariants.
 
-### Failing Tests
+### Failing
 
-If a fuzz test fails, proptest will:
-1. Print the failing input
-2. Save it to the regression corpus
-3. Provide a minimal reproducer
+On a failed assertion or panic, libFuzzer prints the failing input and writes a
+reproducer to `fuzz/artifacts/<target>/`. Re-run the target with that file path
+(see above) to reproduce deterministically, then narrow it down with:
 
-Example failure output:
-
-```
-thread 'fuzz_interest_calculation_bounded' panicked at 'assertion failed: interest_fee <= interest_portion'
-Failing input: principal=500000, interest_portion=100000, fee_bps=15000
+```bash
+cargo +nightly fuzz tmin <target> fuzz/artifacts/<target>/<crash-file>
 ```
 
 ## Best Practices
 
-1. **Run regularly**: Execute fuzz tests before each commit
-2. **Increase iterations**: Use `PROPTEST_CASES=1000000` for thorough testing
-3. **Monitor corpus**: Review regression corpus for patterns
-4. **Update invariants**: Add new fuzz tests when adding arithmetic functions
-5. **Document assumptions**: Keep this guide updated with new tests
-
-## Troubleshooting
-
-### Tests timeout
-
-Increase the timeout or reduce iterations:
-
-```bash
-PROPTEST_TIMEOUT=60 cargo test fuzz_
-```
-
-### Out of memory
-
-Reduce the number of cases:
-
-```bash
-PROPTEST_CASES=10000 cargo test fuzz_
-```
-
-### Flaky tests
-
-Check for non-deterministic behavior. All fuzz tests should be deterministic.
+1. **Run before contract changes** that touch arithmetic.
+2. **Extend coverage**: add a new fuzz target when adding a financial calculation.
+3. **Keep targets in sync** with the contract logic they mirror, and update this
+   guide when targets change.
+4. **Commit useful corpus seeds** if a particular input class is worth retaining.
 
 ## References
 
-- [proptest Documentation](https://docs.rs/proptest/)
-- [Property-Based Testing](https://hypothesis.works/articles/what-is-property-based-testing/)
+- [cargo-fuzz documentation](https://rust-fuzz.github.io/book/cargo-fuzz.html)
+- [libFuzzer documentation](https://llvm.org/docs/LibFuzzer.html)
 - [StellarKraal Protocol Docs](../protocol/)
