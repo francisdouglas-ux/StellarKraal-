@@ -9,7 +9,7 @@
  * - loan/liquidated       → update loan status to liquidated
  */
 
-import { SorobanRpc, xdr } from "@stellar/stellar-sdk";
+import { rpc as SorobanRpc, xdr, Address } from "@stellar/stellar-sdk";
 import logger from "./utils/logger";
 import { insertCollateral, insertLoan, updateTransaction } from "./db/store";
 
@@ -28,7 +28,8 @@ function handleEvent(event: SorobanRpc.Api.RawEventResponse): void {
   try {
     if (event.type !== "contract") return;
 
-    const topics = event.topic.map((t) => xdr.ScVal.fromXDR(t, "base64"));
+    const rawTopics = event.topic ?? [];
+    const topics = rawTopics.map((t) => xdr.ScVal.fromXDR(t, "base64"));
     if (topics.length < 2) return;
 
     const ns = topics[0].sym?.().toString();
@@ -44,7 +45,7 @@ function handleEvent(event: SorobanRpc.Api.RawEventResponse): void {
       const vals = xdr.ScVal.fromXDR(event.value, "base64").vec?.() ?? [];
       if (vals.length < 5) return;
       const id = vals[0].u64?.().toString() ?? "";
-      const owner = vals[1].address?.accountId().ed25519?.().toString("hex") ?? "";
+      const owner = (() => { try { return Address.fromScVal(vals[1]).toString(); } catch { return ""; } })();
       const animal_type = vals[2].sym?.().toString() ?? "";
       const count = Number(vals[3].u32?.() ?? 0);
       const appraised_value = Number(vals[4].i128?.().lo ?? 0);
@@ -55,7 +56,7 @@ function handleEvent(event: SorobanRpc.Api.RawEventResponse): void {
       const vals = xdr.ScVal.fromXDR(event.value, "base64").vec?.() ?? [];
       if (vals.length < 3) return;
       const id = vals[0].u64?.().toString() ?? "";
-      const borrower = vals[1].address?.accountId().ed25519?.().toString("hex") ?? "";
+      const borrower = (() => { try { return Address.fromScVal(vals[1]).toString(); } catch { return ""; } })();
       const amount = Number(vals[2].i128?.().lo ?? 0);
       insertLoan({ id, borrower, collateral_id: "", amount });
       logger.info("loan_synced", { id, borrower, amount });
@@ -89,12 +90,11 @@ async function poll(): Promise<void> {
 
   try {
     const server = new SorobanRpc.Server(RPC_URL);
-    const startLedger = lastLedger > 0 ? lastLedger + 1 : undefined;
+    const eventsRequest = lastLedger > 0
+      ? { startLedger: lastLedger + 1, filters: [{ type: "contract" as const, contractIds: [contractId] }] }
+      : { cursor: "0", filters: [{ type: "contract" as const, contractIds: [contractId] }] };
 
-    const response = await server.getEvents({
-      startLedger,
-      filters: [{ type: "contract", contractIds: [contractId] }],
-    });
+    const response = await server.getEvents(eventsRequest);
 
     for (const event of response.events) {
       handleEvent(event as unknown as SorobanRpc.Api.RawEventResponse);

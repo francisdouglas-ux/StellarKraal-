@@ -44,7 +44,7 @@ function verifyJwt(token: string): Record<string, unknown> {
   const expected = b64url(createHmac('sha256', JWT_SECRET).update(`${header}.${body}`).digest());
   if (sig !== expected) throw new Error('invalid signature');
   const payload = JSON.parse(Buffer.from(body, 'base64').toString()) as Record<string, unknown>;
-  if (typeof payload.exp === 'number' && Date.now() > payload.exp) throw new Error('expired');
+  if (typeof payload.exp === 'number' && Math.floor(Date.now() / 1000) > payload.exp) throw new Error('expired');
   return payload;
 }
 
@@ -140,6 +140,10 @@ const PROTECTED_GET_PATTERNS = [/^\/api\/loans\/[^/]+$/, /^\/api\/collateral$/];
  * Protects all POST/PUT/DELETE/PATCH routes and specific GET routes.
  * Public routes: /api/auth/*, /api/health, GET /api/v1/health.
  * Attach as app-level middleware after auth router is mounted.
+ * @param req - Incoming Express request.
+ * @param res - Express response object.
+ * @param next - Next middleware callback.
+ * @returns void
  */
 export function jwtMiddleware(req: Request, res: Response, next: NextFunction): void {
   const mutating = ['POST', 'PUT', 'DELETE', 'PATCH'];

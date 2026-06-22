@@ -21,15 +21,18 @@ import { stellarPublicKeySchema } from "../validators/stellar";
 import { registerWebhook, getWebhooks, getDeliveryLogs, fireWebhooks } from "../webhooks";
 import { timeoutMiddleware } from "../middleware/timeout";
 import { writeLimiter } from "../middleware/rateLimit";
-import { getCollateral } from "../db/store";
-
-const { Server } = SorobanRpc;
-
-const RPC_URL = process.env.RPC_URL || "https://soroban-testnet.stellar.org";
+import {
+  getCollateral,
+  listLoans,
+  getLoan,
+  updateLoan,
+  updateCollateral,
+  insertTransaction,
+  insertLiquidationEvent,
+} from "../db/store";
 import { fireAlert } from "../utils/alerting";
 import { rules } from "../utils/alertRules";
 import rpcClient from "../utils/rpcClient";
-import { listLoans, getLoan, updateLoan, getCollateral, updateCollateral, insertTransaction, insertLiquidationEvent } from "../db/store";
 const CONTRACT_ID = process.env.CONTRACT_ID || "";
 const NETWORK_PASSPHRASE =
   config.NEXT_PUBLIC_NETWORK === "mainnet" ? Networks.PUBLIC : Networks.TESTNET;
@@ -52,6 +55,7 @@ const loanRequestSchema = z.object({
   borrower: stellarPublicKeySchema,
   collateral_ids: z.array(z.number().int().nonnegative()).min(1),
   amount: z.number().int().positive(),
+  min_disbursement: z.number().int().positive().optional(),
 });
 
 const loanRepaySchema = z.object({
@@ -128,7 +132,7 @@ v1Router.get("/health", async (req: Request, res: Response, next: NextFunction) 
 // POST /collateral/register
 v1Router.post(
   "/collateral/register",
-  timeoutMiddleware(config.TIMEOUT_WRITE_MS),
+  timeoutMiddleware(parseInt(config.TIMEOUT_WRITE_MS, 10)),
   writeLimiter,
   asyncHandler(async (req: Request, res: Response) => {
     const validation = registerCollateralSchema.safeParse(req.body);
@@ -149,19 +153,23 @@ v1Router.post(
 // POST /loan/request
 v1Router.post(
   "/loan/request",
-  timeoutMiddleware(config.TIMEOUT_WRITE_MS),
+  timeoutMiddleware(parseInt(config.TIMEOUT_WRITE_MS, 10)),
   writeLimiter,
   asyncHandler(async (req: Request, res: Response) => {
     const validation = loanRequestSchema.safeParse(req.body);
     if (!validation.success) {
       return res.status(400).json({ error: "Validation failed", details: validation.error.issues });
     }
-    const { borrower, collateral_ids, amount } = validation.data;
+    const { borrower, collateral_ids, amount, min_disbursement } = validation.data;
     const idsScVal = xdr.ScVal.scvVec(collateral_ids.map(id => nativeToScVal(BigInt(id), { type: "u64" })));
+    const minDisbursementScVal = min_disbursement !== undefined
+      ? nativeToScVal(BigInt(min_disbursement), { type: "i128" })
+      : xdr.ScVal.scvVoid();
     const xdrTx = await buildContractTx(borrower, "request_loan", [
       new Address(borrower).toScVal(),
       idsScVal,
       nativeToScVal(BigInt(amount), { type: "i128" }),
+      minDisbursementScVal,
     ]);
     fireWebhooks("loan.approved", { borrower, collateral_ids, amount });
     res.json({ xdr: xdrTx });
@@ -171,7 +179,7 @@ v1Router.post(
 // POST /loan/repay
 v1Router.post(
   "/loan/repay",
-  timeoutMiddleware(config.TIMEOUT_WRITE_MS),
+  timeoutMiddleware(parseInt(config.TIMEOUT_WRITE_MS, 10)),
   writeLimiter,
   asyncHandler(async (req: Request, res: Response) => {
     const validation = loanRepaySchema.safeParse(req.body);
@@ -286,7 +294,7 @@ v1Router.get("/health/:loanId", async (req: Request, res: Response, next: NextFu
 
 // GET /collateral/:id
 v1Router.get("/collateral/:id", (req: Request, res: Response) => {
-  const record = getCollateral(req.params.id);
+  const record = getCollateral(req.params.id as string);
   if (!record) {
     return res.status(404).json({ error: "Collateral not found" });
   }
@@ -344,7 +352,7 @@ v1Router.get("/loans", asyncHandler(async (req: Request, res: Response) => {
 // POST /oracle/price-update
 v1Router.post(
   "/oracle/price-update",
-  timeoutMiddleware(config.TIMEOUT_WRITE_MS),
+  timeoutMiddleware(parseInt(config.TIMEOUT_WRITE_MS, 10)),
   (_req: Request, res: Response) => {
     invalidateAll();
     res.json({ invalidated: true });
@@ -354,7 +362,7 @@ v1Router.post(
 // POST /webhooks
 v1Router.post(
   "/webhooks",
-  timeoutMiddleware(config.TIMEOUT_WRITE_MS),
+  timeoutMiddleware(parseInt(config.TIMEOUT_WRITE_MS, 10)),
   (req: Request, res: Response) => {
     const { url } = req.body;
     if (!url || typeof url !== "string") {

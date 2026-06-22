@@ -11,10 +11,9 @@ import {
   getCollateral,
   getLoan,
   listLoans,
-  type CollateralRecord,
   type LoanRecord,
 } from "./db/store";
-import { makeCollateral, makeLoan } from "../../tests/fixtures";
+import { makeCollateral } from "../../tests/fixtures";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 

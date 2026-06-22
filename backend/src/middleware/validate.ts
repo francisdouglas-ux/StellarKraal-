@@ -6,6 +6,8 @@ import { ZodSchema } from 'zod';
  * Unknown fields are stripped (uses schema.strip() behaviour via safeParse).
  * On failure, responds 400 with { errors: [{ field, message }] }.
  *
+ * @param schema - The Zod schema to validate against.
+ * @returns Express middleware function that validates and parses the request body.
  * @example
  * router.post("/loan/request", validate(loanRequestSchema), handler);
  */

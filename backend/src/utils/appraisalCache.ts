@@ -44,6 +44,7 @@ export function getAppraisal(collateralId: string): CacheEntry | null {
  * Store or update an appraisal value in the cache.
  * @param collateralId - The collateral record ID.
  * @param value - Oracle-appraised value to cache.
+ * @returns void
  */
 export function setAppraisal(collateralId: string, value: number): void {
   cache.set(collateralId, { value, cachedAt: Date.now(), stale: false });
@@ -52,6 +53,8 @@ export function setAppraisal(collateralId: string, value: number): void {
 /**
  * Invalidate a single collateral's cached appraisal.
  * Call when an oracle price update is detected for a specific asset.
+ * @param collateralId - The collateral record ID to invalidate.
+ * @returns void
  */
 export function invalidateAppraisal(collateralId: string): void {
   const deleted = cache.delete(collateralId);
@@ -63,6 +66,7 @@ export function invalidateAppraisal(collateralId: string): void {
 /**
  * Invalidate all cached appraisals.
  * Call on a global oracle price update event.
+ * @returns void
  */
 export function invalidateAll(): void {
   const size = cache.size;
@@ -70,7 +74,10 @@ export function invalidateAll(): void {
   logger.info("appraisal_cache_invalidated_all", { count: size });
 }
 
-/** Exposed for testing only. */
+/**
+ * Exposed for testing only.
+ * @returns The current number of entries in the cache.
+ */
 export function _cacheSize(): number {
   return cache.size;
 }

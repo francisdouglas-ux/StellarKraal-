@@ -1,6 +1,9 @@
 import { Request, Response, NextFunction } from "express";
 import logger from "../utils/logger";
 
+/**
+ * Application-level error class with HTTP status code and error code.
+ */
 export class AppError extends Error {
   constructor(
     public readonly statusCode: number,
@@ -12,6 +15,13 @@ export class AppError extends Error {
   }
 }
 
+/**
+ * Express error handler middleware. Formats and logs all unhandled errors.
+ * @param err - The caught error.
+ * @param req - Express request object.
+ * @param res - Express response object.
+ * @param _next - Unused next function (required for Express error handler signature).
+ */
 export function errorHandler(
   err: Error,
   req: Request,

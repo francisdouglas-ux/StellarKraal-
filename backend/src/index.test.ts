@@ -1,23 +1,19 @@
 import request from "supertest";
 import app from "./index";
-import { insertCollateral, isCollateralPledged, insertLoan } from "./db/store";
-import {
-  insertCollateral,
-  insertLoan,
-  insertTransaction,
-} from "./db/store";
+import { insertCollateral, insertLoan, insertTransaction } from "./db/store";
 
 // Valid 56-char Stellar public key for use in tests
-const TEST_PUBLIC_KEY = "GDVXGGW5LDCKNPGP2QNOUTNAITBJOUEKSXDTYMTEJE2SHYDIBLTXZ3GO";
+const VALID_ADDRESS = "GB4QO2DT7ASHWBIQS4DQ6O7M3UKNT2SWL7TBLZSC4S5FWBSL6VZ6TMEN";
 
 // Mock auth middleware to bypass JWT in tests
-jest.mock("./middleware/auth", () => ({
-  authRouter: (() => {
-    const { Router } = require("express");
-    return Router();
-  })(),
-  jwtMiddleware: (_req: any, _res: any, next: any) => next(),
-}));
+jest.mock("./middleware/auth", () => {
+  const express = jest.requireActual("express");
+  const router = express.Router();
+  return {
+    authRouter: router,
+    jwtMiddleware: (_req: any, _res: any, next: any) => next(),
+  };
+});
 
 // Mock rpcClient to avoid real network calls
 jest.mock("./utils/rpcClient", () => ({
@@ -32,17 +28,25 @@ jest.mock("./utils/rpcClient", () => ({
   },
 }));
 
-const VALID_ADDRESS =
-  "GB4QO2DT7ASHWBIQS4DQ6O7M3UKNT2SWL7TBLZSC4S5FWBSL6VZ6TMEN";
+jest.mock("./utils/connectionPool", () => ({
+  pool: {
+    run: jest.fn().mockResolvedValue({ status: "healthy" }),
+    stats: jest.fn().mockReturnValue({ size: 2, available: 2, inUse: 0, min: 2, max: 10 }),
+    close: jest.fn(),
+  },
+  PoolExhaustedError: class PoolExhaustedError extends Error {},
+}));
 
-jest.mock("./middleware/auth", () => {
-  const express = jest.requireActual("express");
-  const router = express.Router();
-  return {
-    authRouter: router,
-    jwtMiddleware: (_req: any, _res: any, next: any) => next(),
-  };
-});
+jest.mock("./db/migrationRunner", () => ({
+  runMigrations: jest.fn().mockResolvedValue(undefined),
+  checkDbHealth: jest.fn().mockResolvedValue(true),
+  getMigrationStatus: jest.fn().mockResolvedValue("ok"),
+}));
+
+jest.mock("./utils/responseCache", () => ({
+  responseCacheMiddleware: (_req: any, _res: any, next: any) => next(),
+  invalidateCache: jest.fn(),
+}));
 
 // Mock the logger
 jest.mock("./utils/logger", () => ({
@@ -90,6 +94,18 @@ jest.mock("@stellar/stellar-sdk", () => {
     })),
     nativeToScVal: jest.fn().mockReturnValue({}),
     SorobanRpc: {
+      Server: jest.fn().mockImplementation(() => ({
+        getAccount: jest.fn().mockResolvedValue({ id: "GABC", sequence: "1" }),
+        prepareTransaction: jest
+          .fn()
+          .mockResolvedValue({ toXDR: () => "prepared_xdr" }),
+        simulateTransaction: jest
+          .fn()
+          .mockResolvedValue({ result: { retval: { value: 42 } } }),
+        getHealth: jest.fn().mockResolvedValue({ status: "healthy" }),
+      })),
+    },
+    rpc: {
       Server: jest.fn().mockImplementation(() => ({
         getAccount: jest.fn().mockResolvedValue({ id: "GABC", sequence: "1" }),
         prepareTransaction: jest
@@ -533,6 +549,9 @@ describe("StellarKraal API", () => {
       });
       expect(res.status).toBe(409);
       expect(res.body).toHaveProperty("error", "Collateral is already pledged to another loan");
+    });
+  });
+
   describe("CORS middleware", () => {
     const FRONTEND = "http://localhost:3000";
 
