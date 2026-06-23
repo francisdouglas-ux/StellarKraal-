@@ -1,6 +1,53 @@
-# Docker Security Scanning
+# Security Scanning
 
-This document describes the security scanning process for Docker images in the StellarKraal project.
+This document describes the security scanning processes for the StellarKraal project.
+
+## Secret Scanning
+
+We use [Gitleaks](https://github.com/gitleaks/gitleaks) to detect accidentally committed secrets such as API tokens, Slack webhook URLs, JWT secrets, and Stellar secret keys.
+
+### When Secret Scans Run
+
+1. **Every Push**: `.github/workflows/secret-scan.yml` runs on all pushed branches
+2. **Pull Requests**: The same workflow runs on all PRs
+3. **Manual**: The workflow can be started with `workflow_dispatch`
+4. **Local Commits**: `.husky/pre-commit` runs the staged diff scan before `lint-staged`
+
+### Secret Scan Configuration
+
+- **Default Rules**: `.gitleaks.toml` extends the built-in Gitleaks rules
+- **Stellar Secret Keys**: Custom rule detects `S[A-Z2-7]{55}`
+- **JWT Secrets**: Custom rule detects likely `JWT_SECRET` and `JWT_SECRET_KEY` assignments
+- **Slack Webhooks**: Custom rule detects `https://hooks.slack.com/services/...` URLs
+- **Allowlist**: Known safe example and test fixture placeholders are allowlisted by exact value
+
+### Local Usage
+
+Install Gitleaks locally and make sure `gitleaks` is available on your `PATH`.
+
+Official Gitleaks docs list Homebrew, Docker, Go/source builds, and binary releases as supported install paths:
+https://github.com/gitleaks/gitleaks#installing
+
+```bash
+# Scan staged changes, matching the Husky hook
+npm run secret:scan:staged
+
+# Scan the working tree
+npm run secret:scan
+```
+
+The Husky hook is installed by `npm install` through the existing `prepare` script.
+
+### Handling Findings
+
+1. Remove the secret from the commit.
+2. Rotate the exposed credential immediately.
+3. If the secret reached a shared branch, treat it as compromised and follow the incident response process in `SECURITY.md`.
+4. Only add allowlist entries for non-sensitive placeholders or deterministic test fixtures. Do not allowlist broad paths that could hide real secrets.
+
+## Docker Security Scanning
+
+This section describes the security scanning process for Docker images in the StellarKraal project.
 
 ## Overview
 
