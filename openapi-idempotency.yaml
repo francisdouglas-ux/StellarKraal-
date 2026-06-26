@@ -1,0 +1,43 @@
+# Add this to your OpenAPI spec under POST /api/v1/loans
+parameters:
+  - name: Idempotency-Key
+    in: header
+    description: |
+      Unique key to ensure idempotent requests. 
+      If a request with the same key is received within 24 hours,
+      the original response is returned.
+    required: true
+    schema:
+      type: string
+      minLength: 1
+    example: "7a8b3c2d-1e4f-5g6h-7i8j-9k0l1m2n3o4p"
+
+# Response for duplicate request
+responses:
+  201:
+    description: Loan created successfully (or duplicate request)
+    content:
+      application/json:
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+            data:
+              $ref: '#/components/schemas/Loan'
+            message:
+              type: string
+  422:
+    description: Validation error (missing or invalid Idempotency-Key)
+    content:
+      application/json:
+        schema:
+          type: object
+        properties:
+          error:
+            type: string
+          message:
+            type: string
+        example:
+          error: "Missing Required Header"
+          message: "Idempotency-Key header is required for POST /api/v1/loans"
