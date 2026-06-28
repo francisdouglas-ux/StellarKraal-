@@ -6,6 +6,8 @@ import OfflineBanner from "@/components/OfflineBanner";
 import Navbar from "@/components/Navbar";
 import ThemeProvider, { ThemeScript } from "@/components/ThemeProvider";
 import { ToastProvider, ToastContainer } from "@/components/toast";
+import SkipToContent from "@/components/SkipToContent";
+import NetworkMismatchBanner from "@/components/NetworkMismatchBanner";
 
 export const metadata: Metadata = {
   title: "StellarKraal — Livestock Micro-Lending",
@@ -30,6 +32,8 @@ export default function RootLayout({
         <ThemeProvider>
           <KeyboardShortcutsProvider>
             <ToastProvider>
+              <SkipToContent />
+              <NetworkMismatchBanner />
               <OfflineBanner />
             {/* Top utility nav */}
             <nav
@@ -84,7 +88,9 @@ export default function RootLayout({
               </Link>
             </nav>
             <Navbar />
+            <main id="main-content">
             {children}
+            </main>
             <ToastContainer />
             </ToastProvider>
           </KeyboardShortcutsProvider>

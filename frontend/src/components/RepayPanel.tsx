@@ -8,6 +8,7 @@ import { colors } from "@/lib/design-tokens";
 import Card from "@/components/Card";
 import Spinner from "@/components/Spinner";
 import { useToast } from "@/components/toast";
+import { useNetworkMismatch } from "@/hooks/useNetworkMismatch";
 
 interface Props {
   walletAddress: string;
@@ -23,6 +24,7 @@ export default function RepayPanel({ walletAddress }: Props) {
   const [amount, setAmount] = useState("");
   const [loading, setLoading] = useState(false);
   const toast = useToast();
+  const networkMismatch = useNetworkMismatch(walletAddress);
 
   async function repay() {
     setLoading(true);
@@ -80,7 +82,7 @@ export default function RepayPanel({ walletAddress }: Props) {
         <Tooltip hint="R — Repay loan">
           <button
             onClick={repay}
-            disabled={loading}
+            disabled={loading || networkMismatch}
             className="w-full bg-gold text-brown py-2.5 rounded-xl font-semibold hover:bg-gold/80 transition disabled:opacity-50"
           >
             {loading ? "Processing…" : "Repay"}
@@ -88,7 +90,7 @@ export default function RepayPanel({ walletAddress }: Props) {
         </Tooltip>
         <button
           onClick={repay}
-          disabled={loading}
+          disabled={loading || networkMismatch}
           className={`w-full ${colors.secondary.bg} ${colors.secondary.text} py-2.5 rounded-xl font-semibold ${colors.secondary.hover} transition ${colors.interactive.disabled} ${colors.interactive.focus} flex items-center justify-center gap-2`}
         >
           {loading ? (

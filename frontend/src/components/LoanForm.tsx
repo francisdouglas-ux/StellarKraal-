@@ -7,6 +7,7 @@ import Spinner from '@/components/Spinner';
 import { useToast } from '@/components/toast';
 import { Input, Select } from '@/components/ui';
 import { useFetchWithRateLimit } from '@/hooks/useFetchWithRateLimit';
+import { useNetworkMismatch } from '@/hooks/useNetworkMismatch';
 
 interface Props {
   walletAddress: string;
@@ -71,6 +72,7 @@ export default function LoanForm({ walletAddress, initialCollateralId }: Props) 
   const [loading, setLoading] = useState(false);
   const toast = useToast();
   const { retryCountdown, isRateLimited, fetchWithLimit } = useFetchWithRateLimit();
+  const networkMismatch = useNetworkMismatch(walletAddress);
 
   // ── Derived errors ──────────────────────────────────────────────────────────
 
@@ -195,8 +197,8 @@ export default function LoanForm({ walletAddress, initialCollateralId }: Props) 
           />
           <button
             onClick={registerCollateral}
-            disabled={loading || isRateLimited}
-            aria-disabled={loading || isRateLimited}
+            disabled={loading || isRateLimited || networkMismatch}
+            aria-disabled={loading || isRateLimited || networkMismatch}
             className={`w-full ${colors.primary.bg} ${colors.primary.text} py-2.5 rounded-xl font-semibold ${colors.primary.hover} transition ${colors.interactive.disabled} ${colors.interactive.focus} flex items-center justify-center gap-2`}
           >
             {loading ? (
@@ -232,8 +234,8 @@ export default function LoanForm({ walletAddress, initialCollateralId }: Props) 
           />
           <button
             onClick={requestLoan}
-            disabled={loading || isRateLimited}
-            aria-disabled={loading || isRateLimited}
+            disabled={loading || isRateLimited || networkMismatch}
+            aria-disabled={loading || isRateLimited || networkMismatch}
             className={`w-full ${colors.secondary.bg} ${colors.secondary.text} py-2.5 rounded-xl font-semibold ${colors.secondary.hover} transition ${colors.interactive.disabled} ${colors.interactive.focus} flex items-center justify-center gap-2`}
           >
             {loading ? (
