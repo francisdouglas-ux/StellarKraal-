@@ -22,6 +22,9 @@ import {
   insertTransaction,
   listTransactions,
   getTransaction,
+  updateCollateral,
+  insertAuditEntry,
+  listAuditEntries,
   type TransactionType,
 } from "./db/store";
 import { corsMiddleware } from "./middleware/cors";
@@ -39,7 +42,7 @@ import {
 } from "@stellar/stellar-sdk";
 import logger, { createRequestLogger } from "./utils/logger";
 import { pool, PoolExhaustedError } from "./utils/connectionPool";
-import { auditMiddleware } from "./middleware/audit";
+import { auditMiddleware, redact, auditLogger } from "./middleware/audit";
 import { authRouter, jwtMiddleware } from "./middleware/auth";
 import { timeoutMiddleware } from "./middleware/timeout";
 import {
@@ -794,6 +797,65 @@ app.get(
   }),
 );
 
+/**
+ * GET /api/v1/admin/audit — paginated audit log for admins.
+ *
+ * Security threat model:
+ *   - Endpoint requires admin role claim in JWT to prevent unprivileged access to audit logs.
+ *   - Date range capped at 90 days to prevent resource exhaustion / long-running queries.
+ *   - requestBody is stored already-redacted; re-redacted here for defence in depth.
+ *
+ * Query params:
+ *   from     ISO date lower bound (inclusive)
+ *   to       ISO date upper bound (inclusive)
+ *   userId   filter by user ID
+ *   page     page number (default 1)
+ *   limit    records per page (default 20, max 100)
+ */
+app.get(
+  "/api/v1/admin/audit",
+  asyncHandler(async (req: Request, res: Response) => {
+    // Admin-only: require role === "admin" in JWT payload
+    const user = (req as any).user as { publicKey?: string; role?: string } | undefined;
+    if (!user || user.role !== "admin") {
+      return res.status(403).json({ error: "Forbidden: admin role required" });
+    }
+
+    const { from, to, userId } = req.query as Record<string, string | undefined>;
+    const pageRaw = req.query.page !== undefined ? Number(req.query.page) : 1;
+    const limitRaw = req.query.limit !== undefined ? Number(req.query.limit) : 20;
+
+    if (!Number.isInteger(pageRaw) || pageRaw < 1) {
+      return res.status(400).json({ error: "page must be a positive integer" });
+    }
+    if (!Number.isInteger(limitRaw) || limitRaw < 1 || limitRaw > 100) {
+      return res.status(400).json({ error: "limit must be between 1 and 100" });
+    }
+
+    // Validate and enforce 90-day max range
+    const MS_90_DAYS = 90 * 24 * 60 * 60 * 1000;
+    if (from && isNaN(new Date(from).getTime())) {
+      return res.status(400).json({ error: "from must be a valid ISO date" });
+    }
+    if (to && isNaN(new Date(to).getTime())) {
+      return res.status(400).json({ error: "to must be a valid ISO date" });
+    }
+    if (from && to) {
+      const rangeMs = new Date(to).getTime() - new Date(from).getTime();
+      if (rangeMs > MS_90_DAYS) {
+        return res.status(400).json({ error: "Date range must not exceed 90 days" });
+      }
+    }
+
+    const result = listAuditEntries({ from, to, userId, page: pageRaw, limit: limitRaw });
+
+    // Re-redact requestBody for defence in depth
+    const data = result.data.map((e) => ({ ...e, requestBody: redact(e.requestBody as object) }));
+
+    res.json({ data, total: result.total, page: result.page, limit: result.limit });
+  }),
+);
+
 // ── soft-delete admin routes ──────────────────────────────────────────────────
 
 // GET /api/admin/deleted/collateral — list soft-deleted collateral records
@@ -975,6 +1037,68 @@ app.put("/api/v1/collateral/:id/appraise", timeoutMiddleware(parseInt(config.TIM
   res.json(record);
 }));
 
+/**
+ * PATCH /api/v1/collateral/:id — partial update of mutable collateral fields.
+ * Accepts any subset of: animal_type, count, appraised_value.
+ * Returns 400 if appraised_value is zero or negative.
+ * Returns 409 if collateral is pledged to an active loan and appraised_value is being reduced.
+ * Writes a structured audit log entry on every successful update.
+ */
+app.patch("/api/v1/collateral/:id", timeoutMiddleware(parseInt(config.TIMEOUT_WRITE_MS, 10)), asyncHandler(async (req: Request, res: Response) => {
+  const patchSchema = z.object({
+    animal_type: z.string().min(1).optional(),
+    count: z.number().int().positive().optional(),
+    appraised_value: z.number().int().optional(),
+  }).strict();
+
+  const validation = patchSchema.safeParse(req.body);
+  if (!validation.success) {
+    return res.status(400).json({ error: "Validation failed", details: validation.error.issues });
+  }
+
+  const updates = validation.data;
+
+  if (updates.appraised_value !== undefined && updates.appraised_value <= 0) {
+    return res.status(400).json({ error: "appraised_value must be positive" });
+  }
+
+  const record = getCollateral(req.params.id);
+  if (!record) return res.status(404).json({ error: "Record not found" });
+
+  // 409: pledged to active loan and appraised_value is being reduced
+  if (
+    updates.appraised_value !== undefined &&
+    updates.appraised_value < record.appraised_value &&
+    isCollateralPledged(req.params.id)
+  ) {
+    return res.status(409).json({
+      error: "Cannot reduce appraised_value: collateral is pledged to an active loan",
+    });
+  }
+
+  const updated = updateCollateral(req.params.id, updates);
+  if (!updated) return res.status(404).json({ error: "Record not found" });
+
+  // Audit log entry
+  const user = (req as any).user;
+  insertAuditEntry({
+    userId: user?.publicKey ?? "anonymous",
+    action: "collateral.patch",
+    resource: "collateral",
+    resourceId: req.params.id,
+    requestBody: redact(updates),
+    ip: req.ip,
+  });
+  auditLogger.info("collateral.patch", {
+    requestId: (req as any).requestId,
+    collateralId: req.params.id,
+    userId: user?.publicKey,
+    updates: redact(updates),
+  });
+
+  res.json(updated);
+}));
+
 // DELETE /api/v1/collateral/:id — soft delete
 app.delete("/api/v1/collateral/:id", handleDeleteCollateral);
 
@@ -1114,7 +1238,7 @@ const healthFactorTask = scheduleHealthFactorJob();
 
 // ── Graceful Shutdown ─────────────────────────────────────────────────────────
 
-const SHUTDOWN_TIMEOUT_MS = 30000; // 30 seconds
+const SHUTDOWN_TIMEOUT_MS = parseInt(config.SHUTDOWN_TIMEOUT_MS, 10);
 
 async function gracefulShutdown(signal: string): Promise<void> {
   if (isShuttingDown) {

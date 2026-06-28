@@ -28,6 +28,21 @@ const envSchema = z.object({
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
   // Frontend URL for CORS
   FRONTEND_URL: z.string().url("FRONTEND_URL must be a valid URL").optional(),
+  /**
+   * Graceful shutdown drain timeout in milliseconds.
+   * The server waits up to this duration for in-flight requests to complete
+   * before forcing exit. Must be at least 1000 ms.
+   * @default 10000
+   */
+  SHUTDOWN_TIMEOUT_MS: z
+    .string()
+    .regex(/^\d+$/, "SHUTDOWN_TIMEOUT_MS must be a number")
+    .default("10000")
+    .refine((v) => parseInt(v, 10) >= 1000, {
+      message: "SHUTDOWN_TIMEOUT_MS must be at least 1000 ms",
+    }),
+  // Audit log directory path
+  AUDIT_LOG_DIR: z.string().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);

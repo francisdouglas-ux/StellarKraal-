@@ -33,3 +33,30 @@ export const rpcCallDurationSeconds = new Histogram({
   buckets: [0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
   registers: [registry],
 });
+
+// ── DB Connection Pool metrics ────────────────────────────────────────────────
+
+/** Total number of connections acquired from the pool since process start. */
+export const dbPoolAcquiredTotal = new Counter({
+  name: "db_pool_acquired_total",
+  help: "Total number of DB pool connections acquired",
+  registers: [registry],
+});
+
+/** Current number of available (idle) connections in the pool. */
+export const dbPoolAvailable = new Gauge({
+  name: "db_pool_available",
+  help: "Number of idle connections available in the DB pool",
+  registers: [registry],
+});
+
+/**
+ * Histogram of wait times (in milliseconds) from pool.acquire() call to
+ * connection obtained. High values indicate pool exhaustion pressure.
+ */
+export const dbPoolWaitMs = new Histogram({
+  name: "db_pool_wait_ms",
+  help: "Time spent waiting to acquire a DB pool connection (ms)",
+  buckets: [0, 1, 5, 10, 25, 50, 100, 250, 500],
+  registers: [registry],
+});

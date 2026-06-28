@@ -57,4 +57,42 @@ describe("Graceful Shutdown", () => {
     mockNext();
     expect(mockNext).toHaveBeenCalled();
   });
+
+  it("should respect custom SHUTDOWN_TIMEOUT_MS from environment", () => {
+    // Verify that config reads SHUTDOWN_TIMEOUT_MS and enforces minimum 1000 ms
+    jest.isolateModules(() => {
+      process.env.SHUTDOWN_TIMEOUT_MS = "5000";
+      const { config } = require("./config");
+      expect(config.SHUTDOWN_TIMEOUT_MS).toBe("5000");
+      expect(parseInt(config.SHUTDOWN_TIMEOUT_MS, 10)).toBeGreaterThanOrEqual(1000);
+    });
+  });
+
+  it("should use default timeout of 10000 ms when SHUTDOWN_TIMEOUT_MS is not set", () => {
+    jest.isolateModules(() => {
+      delete process.env.SHUTDOWN_TIMEOUT_MS;
+      const { config } = require("./config");
+      expect(config.SHUTDOWN_TIMEOUT_MS).toBe("10000");
+    });
+  });
+
+  it("should reject SHUTDOWN_TIMEOUT_MS below 1000 ms", () => {
+    const stderrSpy = jest.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => {
+      throw new Error("process.exit called");
+    });
+    try {
+      expect(() => {
+        jest.isolateModules(() => {
+          process.env.SHUTDOWN_TIMEOUT_MS = "500";
+          require("./config");
+        });
+      }).toThrow("process.exit called");
+      const written = stderrSpy.mock.calls.map((c) => c[0]).join("");
+      expect(written).toContain("SHUTDOWN_TIMEOUT_MS must be at least 1000 ms");
+    } finally {
+      stderrSpy.mockRestore();
+      exitSpy.mockRestore();
+    }
+  });
 });

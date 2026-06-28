@@ -377,3 +377,86 @@ export function updateTransaction(id: string, updates: Partial<Omit<TransactionR
   transactionTable.set(id, updated);
   return updated;
 }
+
+// ── Collateral mutations ───────────────────────────────────────────────────────
+
+/**
+ * Partially update mutable fields on a collateral record.
+ * @param id - Collateral record ID.
+ * @param updates - Partial fields: `animal_type`, `count`, `appraised_value`.
+ * @returns Updated {@link CollateralRecord} or `undefined` if not found.
+ */
+export function updateCollateral(
+  id: string,
+  updates: Partial<Pick<CollateralRecord, "animal_type" | "count" | "appraised_value">>
+): CollateralRecord | undefined {
+  const record = collateralTable.get(id);
+  if (!record || record.deletedAt !== null) return undefined;
+  const updated = { ...record, ...updates };
+  collateralTable.set(id, updated);
+  return updated;
+}
+
+// ── Audit log entries (in-memory) ─────────────────────────────────────────────
+
+export interface AuditEntry {
+  id: string;
+  timestamp: string;
+  userId: string;
+  action: string;
+  resource: string;
+  resourceId: string;
+  /** Redacted request body – sensitive fields are masked */
+  requestBody: unknown;
+  ip?: string;
+}
+
+const auditTable: AuditEntry[] = [];
+
+/**
+ * Insert a structured audit log entry into the in-memory audit table.
+ * @param entry - Audit entry fields excluding auto-generated `id` and `timestamp`.
+ */
+export function insertAuditEntry(
+  entry: Omit<AuditEntry, "id" | "timestamp">
+): AuditEntry {
+  const record: AuditEntry = {
+    ...entry,
+    id: `audit_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+    timestamp: new Date().toISOString(),
+  };
+  auditTable.push(record);
+  return record;
+}
+
+/**
+ * Query paginated audit entries with optional filters.
+ * Date range is limited to 90 days per request.
+ * @param filters.from - ISO date lower bound (inclusive).
+ * @param filters.to - ISO date upper bound (inclusive).
+ * @param filters.userId - Filter by user ID.
+ * @param filters.page - Page number (1-indexed, default 1).
+ * @param filters.limit - Records per page (default 20, max 100).
+ */
+export function listAuditEntries(filters?: {
+  from?: string;
+  to?: string;
+  userId?: string;
+  page?: number;
+  limit?: number;
+}): { data: AuditEntry[]; total: number; page: number; limit: number } {
+  const limit = Math.min(filters?.limit ?? 20, 100);
+  const page = Math.max(filters?.page ?? 1, 1);
+
+  let results = [...auditTable];
+
+  if (filters?.userId) results = results.filter((e) => e.userId === filters.userId);
+  if (filters?.from) results = results.filter((e) => new Date(e.timestamp) >= new Date(filters.from!));
+  if (filters?.to) results = results.filter((e) => new Date(e.timestamp) <= new Date(filters.to!));
+
+  results.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+  const total = results.length;
+  const data = results.slice((page - 1) * limit, page * limit);
+  return { data, total, page, limit };
+}

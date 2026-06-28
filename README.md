@@ -65,6 +65,7 @@ Create a `.env` file in the project root containing:
 | `CONTRACT_ID` | Deployed Soroban contract ID | `G...` |
 | `PORT` | Backend service port | `3001` |
 | `NEXT_PUBLIC_API_URL` | Frontend API base URL | `http://localhost:3001` |
+| `SHUTDOWN_TIMEOUT_MS` | Graceful shutdown drain timeout (ms, min 1000, default 10000). On SIGTERM/SIGINT the server stops accepting new connections and waits up to this duration for in-flight requests to complete before forcing exit. | `10000` |
 
 ### Run with Docker Compose
 
