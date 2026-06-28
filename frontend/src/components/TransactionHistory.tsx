@@ -1,7 +1,8 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import EmptyState from './EmptyState';
+import ErrorState from './ErrorState';
 import { EmptyTransactionsIllustration } from './illustrations';
 import Card from '@/components/Card';
 import Pagination from '@/components/Pagination';
@@ -20,21 +21,42 @@ export default function TransactionHistory({ walletAddress }: { walletAddress: s
   const router = useRouter();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const fetchTransactions = useCallback(() => {
+    setLoaded(false);
+    setError(null);
     fetch(`${API}/api/transactions?borrower=${walletAddress}`)
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error(`Server error: ${r.status}`);
+        return r.json();
+      })
       .then((body) => {
         setTransactions(Array.isArray(body?.data) ? body.data : []);
       })
-      .catch(() => setTransactions([]))
+      .catch((e) => {
+        setError(e.message || 'Failed to load transactions');
+        setTransactions([]);
+      })
       .finally(() => setLoaded(true));
   }, [walletAddress]);
 
-  const { page, limit, totalPages, setPage, setLimit, slice } = usePagination(transactions.length);
-  const paginated = slice(transactions);
+  useEffect(() => {
+    fetchTransactions();
+  }, [fetchTransactions]);
 
   if (!loaded) return null;
+
+  if (error) {
+    return (
+      <Card
+        className="mb-4"
+        header={<h2 className="text-xl font-semibold text-brown-700">Transactions</h2>}
+      >
+        <ErrorState message={error} onRetry={fetchTransactions} />
+      </Card>
+    );
+  }
 
   if (transactions.length === 0) {
     return (
@@ -51,6 +73,9 @@ export default function TransactionHistory({ walletAddress }: { walletAddress: s
       </Card>
     );
   }
+
+  const { page, limit, totalPages, setPage, setLimit, slice } = usePagination(transactions.length);
+  const paginated = slice(transactions);
 
   return (
     <Card

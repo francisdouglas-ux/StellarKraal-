@@ -1,10 +1,3 @@
-'use client';
-import { useState, useEffect, useCallback } from 'react';
-import { signTransaction } from '@/lib/freighterClient';
-import { submitSignedXdr } from '@/lib/stellarUtils';
-import ConfirmDialog from '@/components/ConfirmDialog';
-import Spinner from '@/components/Spinner';
-import { Input, Select, Button } from '@/components/ui';
 "use client";
 import { useState, useEffect, useCallback } from "react";
 import { signTransaction } from "@/lib/freighterClient";
@@ -71,6 +64,7 @@ export default function CollateralRegistrationForm({ walletAddress, onSuccess }:
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
 
   useEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
@@ -250,11 +244,9 @@ export default function CollateralRegistrationForm({ walletAddress, onSuccess }:
       setImagePreview(null);
       setErrors({});
       onSuccess?.(result);
-    } catch (e: unknown) {
-      const error = e instanceof Error ? e.message : 'Unknown error';
-      setStatus(`error:${error}`);
     } catch (e: any) {
       toast.error(e.message || "Registration failed");
+      setStatus(`error:${e.message}`);
     } finally {
       setLoading(false);
     }
@@ -414,14 +406,12 @@ export default function CollateralRegistrationForm({ walletAddress, onSuccess }:
           )}
         </div>
 
-        <button
-          type="submit"
-          disabled={loading}
         <motion.button
           type="submit"
           variants={reduced ? undefined : submitVariants}
           animate={loading ? "loading" : "idle"}
           className="w-full bg-brown text-cream py-2.5 rounded-xl font-semibold hover:bg-brown/80 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          disabled={loading}
         >
           {loading ? (
             <>
@@ -431,7 +421,7 @@ export default function CollateralRegistrationForm({ walletAddress, onSuccess }:
           ) : (
             'Register Collateral'
           )}
-        </button>
+        </motion.button>
       </form>
 
       {lastSaved && !loading && (

@@ -110,10 +110,10 @@
         "tags": ["collateral"],
         "summary": "Create collateral record (DB)",
         "operationId": "createCollateral",
-        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RegisterCollateralRequest" } } } },
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/V1CreateCollateralRequest" } } } },
         "responses": {
           "201": { "description": "Created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CollateralRecord" } } } },
-          "400": { "$ref": "#/components/responses/ValidationError" },
+          "422": { "$ref": "#/components/responses/ValidationError" },
           "401": { "$ref": "#/components/responses/Unauthorized" }
         }
       },
@@ -152,6 +152,22 @@
       }
     },
     "/collateral/{id}": {
+      "patch": {
+        "tags": ["collateral"],
+        "summary": "Partially update collateral fields",
+        "operationId": "updateCollateral",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/V1UpdateCollateralRequest" } } }
+        },
+        "responses": {
+          "200": { "description": "Updated record", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CollateralRecord" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "422": { "$ref": "#/components/responses/ValidationError" }
+        }
+      },
       "delete": {
         "tags": ["collateral"],
         "summary": "Soft-delete a collateral record",
@@ -161,6 +177,20 @@
           "200": { "description": "Deleted", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DeletedResponse" } } } },
           "401": { "$ref": "#/components/responses/Unauthorized" },
           "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/collateral/{id}/restore": {
+      "patch": {
+        "tags": ["collateral"],
+        "summary": "Restore soft-deleted collateral",
+        "operationId": "restoreCollateralV1",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": { "description": "Restored", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RestoredResponse" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "description": "Collateral is pledged to an active loan", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } }
         }
       }
     },
@@ -188,7 +218,16 @@
         "parameters": [{ "name": "Idempotency-Key", "in": "header", "required": true, "schema": { "type": "string" }, "description": "Client-generated unique key for idempotent replay" }],
         "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/LoanRepayBody" } } } },
         "responses": {
-          "200": { "description": "Unsigned XDR transaction", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/XdrResponse" } } } },
+          "200": {
+            "description": "Unsigned XDR transaction",
+            "headers": {
+              "X-Idempotent-Replayed": {
+                "schema": { "type": "string", "enum": ["true"] },
+                "description": "Present with value `true` when the response was served from the idempotency cache"
+              }
+            },
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/XdrResponse" } } }
+          },
           "400": { "$ref": "#/components/responses/ValidationError" },
           "401": { "$ref": "#/components/responses/Unauthorized" },
           "429": { "$ref": "#/components/responses/RateLimited" },
@@ -267,6 +306,21 @@
         "responses": {
           "200": { "description": "Paginated loan list", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/LoanPage" } } } },
           "400": { "$ref": "#/components/responses/ValidationError" }
+        }
+      }
+    },
+    "/loans/summary": {
+      "get": {
+        "tags": ["loan"],
+        "summary": "Get borrower loan portfolio summary",
+        "description": "Returns active loan metrics scoped to the authenticated borrower. Responses are cached for 30 seconds.",
+        "operationId": "getLoanSummary",
+        "responses": {
+          "200": {
+            "description": "Borrower summary",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/LoanSummaryResponse" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
         }
       }
     },
@@ -534,7 +588,14 @@
         "type": "object",
         "properties": {
           "error": { "type": "string" },
-          "details": { "type": "array", "items": { "type": "object" } }
+          "code": { "type": "string" },
+          "details": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
         }
       },
       "HealthResponse": {
@@ -558,6 +619,26 @@
           "count": { "type": "integer", "minimum": 1, "example": 5 },
           "appraised_value": { "type": "integer", "minimum": 1, "description": "Total appraised value in token base units", "example": 5000000 }
         }
+      },
+      "V1CreateCollateralRequest": {
+        "type": "object",
+        "required": ["animal_type", "count", "appraised_value"],
+        "properties": {
+          "animal_type": { "type": "string", "minLength": 1, "example": "cattle" },
+          "count": { "type": "integer", "minimum": 1, "example": 5 },
+          "appraised_value": { "type": "number", "exclusiveMinimum": 0, "example": 5000000 }
+        },
+        "additionalProperties": false
+      },
+      "V1UpdateCollateralRequest": {
+        "type": "object",
+        "properties": {
+          "animal_type": { "type": "string", "minLength": 1, "example": "goat" },
+          "count": { "type": "integer", "minimum": 1, "example": 3 },
+          "appraised_value": { "type": "number", "exclusiveMinimum": 0, "example": 3500000 }
+        },
+        "additionalProperties": false,
+        "minProperties": 1
       },
       "CollateralRecord": {
         "type": "object",
@@ -640,6 +721,16 @@
           "page": { "type": "integer" },
           "pageSize": { "type": "integer" }
         }
+      },
+      "LoanSummaryResponse": {
+        "type": "object",
+        "properties": {
+          "activeLoans": { "type": "integer", "minimum": 0 },
+          "totalCollateralValue": { "type": "number", "minimum": 0 },
+          "averageHealthFactor": { "type": "number", "minimum": 0 },
+          "atRiskCount": { "type": "integer", "minimum": 0 }
+        },
+        "required": ["activeLoans", "totalCollateralValue", "averageHealthFactor", "atRiskCount"]
       },
       "XdrResponse": {
         "type": "object",

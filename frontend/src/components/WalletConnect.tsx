@@ -1,4 +1,7 @@
 "use client";
+import { useState } from "react";
+import { isConnected, getAddress, setAllowed } from "@stellar/freighter-api";
+import Tooltip from "@/components/Tooltip";
 import { useEffect } from "react";
 import { colors } from "@/lib/design-tokens";
 import { useWallet } from "@/hooks/useWallet";

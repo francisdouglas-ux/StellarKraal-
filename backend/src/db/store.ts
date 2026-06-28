@@ -2,24 +2,33 @@
  * Lightweight in-memory store with soft delete support.
  * Provides audit trail for loans and collateral records.
  * Migration system is managed by db-migrate for schema versioning.
- * 
+ *
  * Note: This is an in-memory implementation for development.
  * In production, replace with actual database queries.
  */
 
+export interface AppraisalEntry {
+  date: string;
+  value: number;
+}
 export type CollateralStatus = "available" | "pledged" | "liquidated";
 
 export interface CollateralRecord {
   id: string;
   owner: string;
   animal_type: string;
+  breed?: string;
+  age_years?: number;
+  weight_kg?: number;
+  photo_url?: string;
   count: number;
   appraised_value: number;
+  appraisal_history: AppraisalEntry[];
   species?: string;
-  breed?: string;
   age?: number;
   weight?: number;
   image_url?: string;
+  status?: CollateralStatus;
   createdAt: string;
   deletedAt: string | null;
 }
@@ -31,10 +40,17 @@ export interface LoanRecord {
   borrower: string;
   collateral_id: string;
   amount: number;
-  status: LoanStatus;
+  status?: LoanStatus;
   health_factor?: number | null;
   createdAt: string;
   deletedAt: string | null;
+}
+
+export interface LoanSummary {
+  activeLoans: number;
+  totalCollateralValue: number;
+  averageHealthFactor: number;
+  atRiskCount: number;
 }
 
 export type TransactionType = "loan" | "repayment" | "liquidation";
@@ -66,10 +82,32 @@ const transactionTable: Map<string, TransactionRecord> = new Map();
  * @example
  * const record = insertCollateral({ id: "1", owner: "G...", animal_type: "cattle", count: 5, appraised_value: 1000000 });
  */
-export function insertCollateral(data: Omit<CollateralRecord, "createdAt" | "deletedAt" | "status"> & { status?: CollateralStatus }): CollateralRecord {
-  const record: CollateralRecord = { status: "available", ...data, createdAt: new Date().toISOString(), deletedAt: null };
+export function insertCollateral(
+  data: Omit<CollateralRecord, "createdAt" | "deletedAt" | "appraisal_history"> & { status?: CollateralStatus },
+): CollateralRecord {
+  const record: CollateralRecord = {
+    status: "available",
+    ...data,
+    appraisal_history: [{ date: new Date().toISOString(), value: data.appraised_value }],
+    createdAt: new Date().toISOString(),
+    deletedAt: null,
+  };
   collateralTable.set(record.id, record);
   return record;
+}
+
+/**
+ * Add a new appraisal entry for an existing collateral record.
+ * @param id - Collateral record ID.
+ * @param value - New appraised value.
+ * @returns `true` if updated, `false` if not found or soft-deleted.
+ */
+export function addAppraisal(id: string, value: number): boolean {
+  const r = collateralTable.get(id);
+  if (!r || r.deletedAt !== null) return false;
+  r.appraised_value = value;
+  r.appraisal_history.push({ date: new Date().toISOString(), value });
+  return true;
 }
 
 /**
@@ -116,6 +154,32 @@ export function getCollateral(id: string): CollateralRecord | undefined {
 }
 
 /**
+ * Fetch a collateral record by ID including soft-deleted rows.
+ * @param id - Collateral record ID.
+ * @returns The {@link CollateralRecord} or `undefined` if not found.
+ */
+export function getCollateralIncludingDeleted(id: string): CollateralRecord | undefined {
+  return collateralTable.get(id);
+}
+
+/**
+ * Update fields on an existing collateral record.
+ * @param id - Collateral record ID.
+ * @param updates - Partial fields to merge.
+ * @returns The updated {@link CollateralRecord}, or `undefined` if not found.
+ */
+export function updateCollateral(
+  id: string,
+  updates: Partial<Omit<CollateralRecord, "id" | "createdAt">>,
+): CollateralRecord | undefined {
+  const record = collateralTable.get(id);
+  if (!record) return undefined;
+  const updated = { ...record, ...updates };
+  collateralTable.set(id, updated);
+  return updated;
+}
+
+/**
  * Soft-delete a collateral record by setting its `deletedAt` timestamp.
  * @param id - Collateral record ID.
  * @returns `true` if the record was deleted, `false` if not found or already deleted.
@@ -156,13 +220,15 @@ export function listDeletedCollateral(): CollateralRecord[] {
  * @example
  * const loan = insertLoan({ id: "1", borrower: "G...", collateral_id: "1", amount: 600000 });
  */
-export function insertLoan(data: Omit<LoanRecord, "createdAt" | "deletedAt"> & { status?: LoanRecord["status"] }): LoanRecord {
+export function insertLoan(
+  data: Omit<LoanRecord, "createdAt" | "deletedAt"> & { status?: LoanRecord["status"] },
+): LoanRecord {
   const record: LoanRecord = {
     ...data,
     status: data.status ?? "active",
     health_factor: data.health_factor ?? null,
     createdAt: new Date().toISOString(),
-    deletedAt: null
+    deletedAt: null,
   };
   loanTable.set(record.id, record);
   return record;
@@ -171,6 +237,12 @@ export function insertLoan(data: Omit<LoanRecord, "createdAt" | "deletedAt"> & {
 /**
  * Return all non-deleted loan records with optional filtering and pagination.
  * @param filters - Optional filter and pagination parameters.
+ * @param filters.status - Filter by loan status.
+ * @param filters.borrowerAddress - Filter by borrower address.
+ * @param filters.from - Filter by creation date start (ISO string).
+ * @param filters.to - Filter by creation date end (ISO string).
+ * @param filters.page - Page number (1-based).
+ * @param filters.limit - Maximum records per page (capped at 100).
  * @returns Paginated result with `data`, `total`, `page`, and `limit`.
  */
 export function listLoans(filters?: {
@@ -200,14 +272,76 @@ export function listLoans(filters?: {
   return { data, total, page, limit };
 }
 
+/**
+ * Return all active (non-deleted, active or at_risk) loan records.
+ * @returns Array of active {@link LoanRecord} objects.
+ */
 export function listActiveLoans(): LoanRecord[] {
   return [...loanTable.values()].filter(
-    (r) => r.deletedAt === null && (r.status === "active" || r.status === "at_risk")
+    (r) => r.deletedAt === null && (r.status === "active" || r.status === "at_risk"),
   );
+}
+
+function normalizeHealthFactor(value: number | null | undefined): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    return null;
+  }
+  // Normalize store values that may be persisted either as ratio (e.g. 1.15)
+  // or bps (e.g. 11500).
+  return value > 100 ? value / 10_000 : value;
+}
+
+/**
+ * Aggregate dashboard metrics for loans belonging to a borrower.
+ * Only active/at_risk non-deleted loans are included.
+ * @param borrower - Borrower wallet/public key.
+ * @returns Aggregated loan summary metrics.
+ */
+export function getLoanSummaryForBorrower(borrower: string): LoanSummary {
+  const activeLoans = [...loanTable.values()].filter(
+    (r) =>
+      r.deletedAt === null &&
+      r.borrower === borrower &&
+      (r.status === "active" || r.status === "at_risk"),
+  );
+
+  const totalCollateralValue = activeLoans.reduce((sum, loan) => {
+    const collateral = collateralTable.get(loan.collateral_id);
+    if (!collateral || collateral.deletedAt !== null) return sum;
+    return sum + collateral.appraised_value;
+  }, 0);
+
+  const normalizedHealthFactors = activeLoans
+    .map((loan) => normalizeHealthFactor(loan.health_factor))
+    .filter((value): value is number => value !== null);
+
+  const averageHealthFactor =
+    normalizedHealthFactors.length > 0
+      ? Number(
+          (
+            normalizedHealthFactors.reduce((sum, value) => sum + value, 0) /
+            normalizedHealthFactors.length
+          ).toFixed(4),
+        )
+      : 0;
+
+  const atRiskCount = activeLoans.filter((loan) => {
+    const hf = normalizeHealthFactor(loan.health_factor);
+    return hf !== null && hf < 1.2;
+  }).length;
+
+  return {
+    activeLoans: activeLoans.length,
+    totalCollateralValue,
+    averageHealthFactor,
+    atRiskCount,
+  };
 }
 
 /**
  * Fetch a single loan record by ID (excludes soft-deleted records).
+ * @param id - Loan record ID.
+ * @returns The {@link LoanRecord} or `undefined` if not found or deleted.
  */
 export function getLoan(id: string): LoanRecord | undefined {
   const r = loanTable.get(id);
@@ -216,8 +350,14 @@ export function getLoan(id: string): LoanRecord | undefined {
 
 /**
  * Update fields on an existing loan record.
+ * @param id - Loan record ID.
+ * @param updates - Partial fields to merge.
+ * @returns The updated {@link LoanRecord}, or `undefined` if not found.
  */
-export function updateLoan(id: string, updates: Partial<Omit<LoanRecord, "id" | "createdAt">>): LoanRecord | undefined {
+export function updateLoan(
+  id: string,
+  updates: Partial<Omit<LoanRecord, "id" | "createdAt">>,
+): LoanRecord | undefined {
   const record = loanTable.get(id);
   if (!record) return undefined;
   const updated = { ...record, ...updates };
@@ -264,25 +404,22 @@ export function listDeletedLoans(): LoanRecord[] {
  */
 export function isCollateralPledged(collateralId: string): boolean {
   return [...loanTable.values()].some(
-    (r) => r.collateral_id === collateralId && (r.status === "active" || r.status === "at_risk") && r.deletedAt === null
+    (r) =>
+      r.collateral_id === collateralId &&
+      (r.status === "active" || r.status === "at_risk") &&
+      r.deletedAt === null,
   );
 }
 
-// ── Migration exports ─────────────────────────────────────────────────────────
+// ── Migration helper ──────────────────────────────────────────────────────────
 
 /**
  * Migration 001: Add deletedAt column to loans and collateral tables.
  * For a real DB this would be a SQL migration script.
- * Schema:
- *   ALTER TABLE collateral ADD COLUMN deletedAt TEXT DEFAULT NULL;
- *   ALTER TABLE loans      ADD COLUMN deletedAt TEXT DEFAULT NULL;
- *   CREATE INDEX idx_collateral_deleted ON collateral(deletedAt);
- *   CREATE INDEX idx_loans_deleted      ON loans(deletedAt);
  */
 export function runMigrations(): void {
   // No-op for in-memory store; documents intent for real DB migration
 }
-
 
 // ── Transactions ──────────────────────────────────────────────────────────────
 
@@ -293,7 +430,9 @@ export function runMigrations(): void {
  * @example
  * const tx = insertTransaction({ borrower: "G...", type: "loan", status: "pending", amount: 600000 });
  */
-export function insertTransaction(data: Omit<TransactionRecord, "id" | "createdAt" | "updatedAt">): TransactionRecord {
+export function insertTransaction(
+  data: Omit<TransactionRecord, "id" | "createdAt" | "updatedAt">,
+): TransactionRecord {
   const id = `tx_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   const now = new Date().toISOString();
   const record: TransactionRecord = { ...data, id, createdAt: now, updatedAt: now };
@@ -305,8 +444,8 @@ export function insertTransaction(data: Omit<TransactionRecord, "id" | "createdA
  * List transactions with optional filtering and pagination.
  * @param filters - Optional filter and pagination options.
  * @param filters.borrower - Filter by borrower address.
- * @param filters.type - Filter by transaction type (`loan`, `repayment`, `liquidation`).
- * @param filters.status - Filter by status (`pending`, `completed`, `failed`).
+ * @param filters.type - Filter by transaction type.
+ * @param filters.status - Filter by status.
  * @param filters.startDate - ISO date string lower bound for `createdAt`.
  * @param filters.endDate - ISO date string upper bound for `createdAt`.
  * @param filters.page - Page number (1-indexed, default 1).
@@ -327,29 +466,20 @@ export function listTransactions(filters?: {
 
   let results = [...transactionTable.values()];
 
-  if (filters?.borrower) {
-    results = results.filter((t) => t.borrower === filters.borrower);
-  }
-  if (filters?.type) {
-    results = results.filter((t) => t.type === filters.type);
-  }
-  if (filters?.status) {
-    results = results.filter((t) => t.status === filters.status);
-  }
-  if (filters?.startDate) {
+  if (filters?.borrower) results = results.filter((t) => t.borrower === filters.borrower);
+  if (filters?.type) results = results.filter((t) => t.type === filters.type);
+  if (filters?.status) results = results.filter((t) => t.status === filters.status);
+  if (filters?.startDate)
     results = results.filter((t) => new Date(t.createdAt) >= new Date(filters.startDate!));
-  }
-  if (filters?.endDate) {
+  if (filters?.endDate)
     results = results.filter((t) => new Date(t.createdAt) <= new Date(filters.endDate!));
-  }
 
   // Sort by date descending (newest first)
   results.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
   const total = results.length;
   const start = (page - 1) * pageSize;
-  const end = start + pageSize;
-  const data = results.slice(start, end);
+  const data = results.slice(start, start + pageSize);
 
   return { data, total, page, pageSize };
 }
@@ -368,9 +498,11 @@ export function getTransaction(id: string): TransactionRecord | undefined {
  * @param id - Transaction ID.
  * @param updates - Partial fields to merge (excluding `id` and `createdAt`).
  * @returns The updated {@link TransactionRecord}, or `undefined` if not found.
- * @throws Never — returns `undefined` instead of throwing when not found.
  */
-export function updateTransaction(id: string, updates: Partial<Omit<TransactionRecord, "id" | "createdAt">>): TransactionRecord | undefined {
+export function updateTransaction(
+  id: string,
+  updates: Partial<Omit<TransactionRecord, "id" | "createdAt">>,
+): TransactionRecord | undefined {
   const record = transactionTable.get(id);
   if (!record) return undefined;
   const updated = { ...record, ...updates, updatedAt: new Date().toISOString() };
@@ -378,85 +510,37 @@ export function updateTransaction(id: string, updates: Partial<Omit<TransactionR
   return updated;
 }
 
-// ── Collateral mutations ───────────────────────────────────────────────────────
+// ── Liquidation Events ────────────────────────────────────────────────────────
 
-/**
- * Partially update mutable fields on a collateral record.
- * @param id - Collateral record ID.
- * @param updates - Partial fields: `animal_type`, `count`, `appraised_value`.
- * @returns Updated {@link CollateralRecord} or `undefined` if not found.
- */
-export function updateCollateral(
-  id: string,
-  updates: Partial<Pick<CollateralRecord, "animal_type" | "count" | "appraised_value">>
-): CollateralRecord | undefined {
-  const record = collateralTable.get(id);
-  if (!record || record.deletedAt !== null) return undefined;
-  const updated = { ...record, ...updates };
-  collateralTable.set(id, updated);
-  return updated;
-}
-
-// ── Audit log entries (in-memory) ─────────────────────────────────────────────
-
-export interface AuditEntry {
+export interface LiquidationEvent {
   id: string;
+  loan_id: string;
+  liquidator: string;
+  repay_amount: number;
   timestamp: string;
-  userId: string;
-  action: string;
-  resource: string;
-  resourceId: string;
-  /** Redacted request body – sensitive fields are masked */
-  requestBody: unknown;
-  ip?: string;
 }
 
-const auditTable: AuditEntry[] = [];
+const liquidationEventTable: Map<string, LiquidationEvent> = new Map();
 
 /**
- * Insert a structured audit log entry into the in-memory audit table.
- * @param entry - Audit entry fields excluding auto-generated `id` and `timestamp`.
+ * Record a liquidation event.
+ * @param data - Liquidation event fields excluding `id` and `timestamp`.
+ * @returns The created {@link LiquidationEvent}.
  */
-export function insertAuditEntry(
-  entry: Omit<AuditEntry, "id" | "timestamp">
-): AuditEntry {
-  const record: AuditEntry = {
-    ...entry,
-    id: `audit_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
-    timestamp: new Date().toISOString(),
-  };
-  auditTable.push(record);
+export function insertLiquidationEvent(
+  data: Omit<LiquidationEvent, "id" | "timestamp">,
+): LiquidationEvent {
+  const id = `liq_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  const record: LiquidationEvent = { ...data, id, timestamp: new Date().toISOString() };
+  liquidationEventTable.set(id, record);
   return record;
 }
 
 /**
- * Query paginated audit entries with optional filters.
- * Date range is limited to 90 days per request.
- * @param filters.from - ISO date lower bound (inclusive).
- * @param filters.to - ISO date upper bound (inclusive).
- * @param filters.userId - Filter by user ID.
- * @param filters.page - Page number (1-indexed, default 1).
- * @param filters.limit - Records per page (default 20, max 100).
+ * List all liquidation events for a given loan.
+ * @param loan_id - Loan record ID.
+ * @returns Array of {@link LiquidationEvent} objects for the given loan.
  */
-export function listAuditEntries(filters?: {
-  from?: string;
-  to?: string;
-  userId?: string;
-  page?: number;
-  limit?: number;
-}): { data: AuditEntry[]; total: number; page: number; limit: number } {
-  const limit = Math.min(filters?.limit ?? 20, 100);
-  const page = Math.max(filters?.page ?? 1, 1);
-
-  let results = [...auditTable];
-
-  if (filters?.userId) results = results.filter((e) => e.userId === filters.userId);
-  if (filters?.from) results = results.filter((e) => new Date(e.timestamp) >= new Date(filters.from!));
-  if (filters?.to) results = results.filter((e) => new Date(e.timestamp) <= new Date(filters.to!));
-
-  results.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-
-  const total = results.length;
-  const data = results.slice((page - 1) * limit, page * limit);
-  return { data, total, page, limit };
+export function getLiquidationEvents(loan_id: string): LiquidationEvent[] {
+  return [...liquidationEventTable.values()].filter((e) => e.loan_id === loan_id);
 }

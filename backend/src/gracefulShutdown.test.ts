@@ -1,4 +1,3 @@
-import { Server } from "http";
 import "./index";
 
 describe("Graceful Shutdown", () => {
@@ -41,8 +40,8 @@ describe("Graceful Shutdown", () => {
   });
 
   it("should reject new connections during shutdown", async () => {
-    const mockReq = {} as any;
-    const mockRes = {
+    const _mockReq = {} as any;
+    const _mockRes = {
       setHeader: jest.fn(),
       status: jest.fn().mockReturnThis(),
       json: jest.fn(),

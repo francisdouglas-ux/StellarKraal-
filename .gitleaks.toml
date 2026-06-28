@@ -1,0 +1,41 @@
+title = "StellarKraal Gitleaks Configuration"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "stellar-secret-key"
+description = "Detect Stellar secret keys"
+regex = '''S[A-Z2-7]{55}'''
+tags = ["stellar", "secret", "key"]
+
+[[rules]]
+id = "jwt-secret"
+description = "Detect JWT secret assignments"
+regex = '''(?i)\bJWT_SECRET(?:_KEY)?\b\s*[:=]\s*['"]?([A-Za-z0-9_+/=-]{32,})['"]?'''
+secretGroup = 1
+keywords = [
+  "JWT_SECRET",
+  "JWT_SECRET_KEY"
+]
+
+[[rules]]
+id = "slack-webhook-url"
+description = "Detect Slack webhook URLs"
+regex = '''https://hooks\.slack\.com/services/[A-Za-z0-9_/.-]+'''
+keywords = [
+  "hooks.slack.com",
+  "SLACK_WEBHOOK_URL"
+]
+
+[allowlist]
+description = "Allow known safe example and test fixture placeholders"
+regexTarget = "line"
+regexes = [
+  '''SAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA''',
+  '''JWT_SECRET=change-me-to-a-strong-jwt-secret-min-32-chars''',
+  '''JWT_SECRET:\s*"change-me-to-a-strong-jwt-secret-min-32-chars"''',
+  '''change-me-in-production-min-32-chars!!''',
+  '''SLACK_WEBHOOK_URL=https://hooks\.slack\.com/services/YOUR/SLACK/WEBHOOK''',
+  '''SLACK_WEBHOOK_URL=https://hooks\.slack\.com/services/example'''
+]

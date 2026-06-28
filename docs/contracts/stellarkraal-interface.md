@@ -200,6 +200,8 @@ The contract manages livestock-backed loans with the following responsibilities:
 - Returns: `Result<u32, Error>`.
 - State changes: none.
 
+> **Oracle design:** The protocol supports multiple registered oracles with on-chain median aggregation and a configurable quorum (`add_oracle`, `remove_oracle`, `get_oracles`, `submit_oracle_prices`), in addition to the single-oracle `submit_price` + TWAP path documented below. For the trust model, dispute handling, the relationship to the off-chain appraisal cache (`backend/src/utils/appraisalCache.ts`), and rationale, see [ADR-006: Oracle design](../adr/ADR-006-oracle-design.md).
+
 ### `set_oracle_config(env, admin, price_min, price_max, staleness_threshold, max_deviation_bps)`
 - Description: Configure price bounds and freshness validation.
 - Parameters:

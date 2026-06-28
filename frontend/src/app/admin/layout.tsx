@@ -3,6 +3,7 @@
 import React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import SkipToContent from '@/components/SkipToContent';
 
 const adminNav = [
   { label: 'Moderation', href: '/admin/moderation' },
@@ -20,6 +21,7 @@ export default function AdminRootLayout({ children }: AdminRootLayoutProps) {
 
   return (
     <div className="min-h-screen bg-cream-50 dark:bg-stone-900">
+      <SkipToContent />
       <nav className="sticky top-0 z-40 bg-white dark:bg-stone-800 border-b border-brown/10 dark:border-cream/10 shadow-sm">
         <div className="max-w-7xl mx-auto px-6 py-4">
           <div className="flex items-center justify-between mb-4">
@@ -46,7 +48,7 @@ export default function AdminRootLayout({ children }: AdminRootLayoutProps) {
         </div>
       </nav>
 
-      {children}
+      <main id="main-content">{children}</main>
     </div>
   );
 }

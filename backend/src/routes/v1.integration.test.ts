@@ -6,6 +6,7 @@
 import request from "supertest";
 import express, { Express } from "express";
 import { v1Router } from "./v1";
+import { insertCollateral, insertLoan } from "../db/store";
 
 const VALID_ADDRESS = "GASPH4OCYOERATXIKLPNURXUP7ISAQU2KWFB5XLUJ3LQHKHOCN3CEGD6";
 const INVALID_ADDRESS = "INVALID_KEY";
@@ -332,9 +333,15 @@ describe("API v1 Integration Tests", () => {
   // ── 4. Liquidate Loan ─────────────────────────────────────────────────────
 
   describe("POST /api/v1/loan/liquidate", () => {
+    // Seed a liquidatable loan: collateral 700_000, loan 600_000 → HF = 9_333 (< 10_000)
+    beforeEach(() => {
+      insertCollateral({ id: "v1-liq-col", owner: VALID_ADDRESS, animal_type: "cattle", count: 5, appraised_value: 700_000 });
+      insertLoan({ id: "42", borrower: VALID_ADDRESS, collateral_id: "v1-liq-col", amount: 600_000 });
+    });
+
     const validPayload = {
       liquidator: VALID_ADDRESS,
-      loan_id: 1,
+      loan_id: 42,
       repay_amount: 500_000,
     };
 
@@ -476,6 +483,7 @@ describe("API v1 Integration Tests", () => {
       const res = await request(app).get("/api/v1/loans");
       expect(res.status).toBe(200);
       expect(res.headers).toHaveProperty("deprecation", "true");
+      expect(res.headers).toHaveProperty("sunset");
       expect(res.headers).toHaveProperty("warning");
       expect(res.headers.warning).toContain("Unpaginated loan listing is deprecated");
     });
@@ -573,7 +581,9 @@ describe("API v1 Integration Tests", () => {
       expect(healthRes.status).toBe(200);
       expect(healthRes.body.health_factor).toBeDefined();
 
-      // 5. Liquidate loan
+      // 5. Liquidate loan — seed a liquidatable loan (HF < 10_000)
+      insertCollateral({ id: "lifecycle-col", owner: VALID_ADDRESS, animal_type: "cattle", count: 5, appraised_value: 700_000 });
+      insertLoan({ id: "1", borrower: VALID_ADDRESS, collateral_id: "lifecycle-col", amount: 600_000 });
       const liquidateRes = await request(app)
         .post("/api/v1/loan/liquidate")
         .send({

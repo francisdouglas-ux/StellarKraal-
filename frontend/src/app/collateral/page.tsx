@@ -1,47 +1,21 @@
 'use client';
-import { Suspense, useEffect, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { Suspense } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
 import SearchFilterBar from '@/components/SearchFilterBar';
 import PageTransition from '@/components/PageTransition';
 import Card from '@/components/Card';
 import SkeletonCollateralCard from '@/components/SkeletonCollateralCard';
 import EmptyState from '@/components/EmptyState';
+import ErrorState from '@/components/ErrorState';
 import Pagination from '@/components/Pagination';
-import { usePagination } from '@/hooks/usePagination';
-
-interface Collateral {
-  id: string;
-  owner: string;
-  animal_type: string;
-  count: number;
-  appraised_value: number;
-  status?: string;
-}
-
-interface PaginationMeta {
-  total: number;
-  page: number;
-  limit: number;
-  pages: number;
-}
+import { useCollateral } from '@/hooks/useCollateral';
 
 const STATUS_OPTIONS: string[] = [];
 const TYPE_OPTIONS = ['cattle', 'goat', 'sheep', 'pig', 'poultry'];
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
-
 function CollateralListContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const [items, setItems] = useState<Collateral[]>([]);
-  const [meta, setMeta] = useState<PaginationMeta>({
-    total: 0,
-    page: 1,
-    limit: 10,
-    pages: 1,
-  });
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
   const page = parseInt(searchParams.get('page') ?? '1', 10);
   const limit = parseInt(searchParams.get('limit') ?? '10', 10);
@@ -49,43 +23,19 @@ function CollateralListContent() {
   const types = searchParams.getAll('type');
   const sort = searchParams.get('sort') ?? 'newest';
 
-  const fetchCollateral = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const params = new URLSearchParams();
-      params.set('page', page.toString());
-      params.set('limit', limit.toString());
-      if (q) params.set('search', q);
-      if (sort) params.set('sort', sort);
-      types.forEach((t) => params.append('type', t));
-
-      const res = await fetch(`${API}/api/collateral?${params.toString()}`);
-      if (!res.ok) throw new Error('Failed to fetch collateral');
-
-      const data = await res.json();
-      setItems(Array.isArray(data.data) ? data.data : []);
-      if (data.meta) setMeta(data.meta);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
-      setItems([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [page, limit, q, sort, types]);
-
-  useEffect(() => {
-    fetchCollateral();
-  }, [fetchCollateral]);
+  const {
+    items,
+    meta,
+    isLoading: loading,
+    error,
+    refresh,
+  } = useCollateral({ page, limit, search: q, sort, types });
 
   const handlePageChange = (newPage: number) => {
     const params = new URLSearchParams(searchParams);
     params.set('page', newPage.toString());
     router.push(`?${params.toString()}`);
   };
-
-  const { page, limit, totalPages, setPage, setLimit, slice } = usePagination(filtered.length);
-  const paginated = slice(filtered);
 
   return (
     <div className="space-y-4">
@@ -95,12 +45,6 @@ function CollateralListContent() {
         searchPlaceholder="Search by ID, owner, or animal type…"
       />
 
-      {error && (
-        <div className="rounded-lg bg-red-50 border border-red-200 p-4 text-sm text-red-700">
-          {error}
-        </div>
-      )}
-
       {loading ? (
         <ul className="space-y-2">
           {[...Array(3)].map((_, i) => (
@@ -109,7 +53,9 @@ function CollateralListContent() {
             </li>
           ))}
         </ul>
-      ) : filtered.length === 0 ? (
+      ) : error ? (
+        <ErrorState message={error} onRetry={refresh} />
+      ) : items.length === 0 ? (
         <EmptyState
           icon="🐄"
           heading={q || types.length > 0 ? 'No Collateral Found' : 'No Collateral Registered'}
@@ -122,7 +68,7 @@ function CollateralListContent() {
       ) : (
         <>
           <ul className="space-y-2">
-            {paginated.map((col) => (
+            {items.map((col) => (
               <li key={col.id}>
                 <Card>
                   <div className="flex justify-between items-center">
@@ -145,10 +91,15 @@ function CollateralListContent() {
           </ul>
           <Pagination
             page={page}
-            totalPages={totalPages}
+            totalPages={meta.pages}
             limit={limit}
-            onPageChange={setPage}
-            onLimitChange={setLimit}
+            onPageChange={handlePageChange}
+            onLimitChange={(newLimit) => {
+              const params = new URLSearchParams(searchParams);
+              params.set('limit', newLimit.toString());
+              params.set('page', '1');
+              router.push(`?${params.toString()}`);
+            }}
           />
         </>
       )}

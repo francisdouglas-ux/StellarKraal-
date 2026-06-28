@@ -1,10 +1,13 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import KeyboardShortcutsProvider from "@/components/KeyboardShortcutsProvider";
 import Link from "next/link";
 import OfflineBanner from "@/components/OfflineBanner";
 import Navbar from "@/components/Navbar";
 import ThemeProvider, { ThemeScript } from "@/components/ThemeProvider";
 import { ToastProvider, ToastContainer } from "@/components/toast";
+import SkipToContent from "@/components/SkipToContent";
+import NetworkMismatchBanner from "@/components/NetworkMismatchBanner";
 
 export const metadata: Metadata = {
   title: "StellarKraal — Livestock Micro-Lending",
@@ -18,10 +21,6 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <head>
-        {/* Blocking script prevents flash-of-wrong-theme before React hydrates */}
-        <ThemeScript />
-      </head>
       <body
         className="min-h-screen overflow-x-hidden px-4"
         style={{
@@ -29,9 +28,13 @@ export default function RootLayout({
           color: "var(--color-text)",
         }}
       >
+        <ThemeScript />
         <ThemeProvider>
-          <ToastProvider>
-            <OfflineBanner />
+          <KeyboardShortcutsProvider>
+            <ToastProvider>
+              <SkipToContent />
+              <NetworkMismatchBanner />
+              <OfflineBanner />
             {/* Top utility nav */}
             <nav
               className="flex gap-4 px-6 py-3 text-sm border-b"
@@ -70,6 +73,13 @@ export default function RootLayout({
                 FAQ
               </Link>
               <Link
+                href="/profile"
+                className="hover:opacity-100 transition"
+                style={{ color: "var(--color-text-muted)" }}
+              >
+                Profile
+              </Link>
+              <Link
                 href="/settings"
                 className="hover:opacity-100 transition"
                 style={{ color: "var(--color-text-muted)" }}
@@ -78,9 +88,12 @@ export default function RootLayout({
               </Link>
             </nav>
             <Navbar />
+            <main id="main-content">
             {children}
+            </main>
             <ToastContainer />
-          </ToastProvider>
+            </ToastProvider>
+          </KeyboardShortcutsProvider>
         </ThemeProvider>
       </body>
     </html>

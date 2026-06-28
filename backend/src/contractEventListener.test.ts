@@ -1,7 +1,12 @@
-import { startEventListener, stopEventListener } from "./contractEventListener";
+import { z } from "zod";
+import {
+  startEventListener,
+  stopEventListener,
+  createEventLogEntry,
+} from "./contractEventListener";
 
 jest.mock("@stellar/stellar-sdk", () => ({
-  SorobanRpc: {
+  rpc: {
     Server: jest.fn().mockImplementation(() => ({
       getEvents: jest.fn().mockResolvedValue({ events: [] }),
     })),
@@ -25,15 +30,34 @@ jest.mock("./db/store", () => ({
 }));
 
 describe("contractEventListener", () => {
+  const runtimeLogSchema = z
+    .object({
+      timestamp: z.string().datetime(),
+      eventType: z.string().min(1),
+      contractId: z.string().min(1),
+      ledger: z.number().int().nonnegative(),
+      correlationId: z.string().min(1),
+      context: z.record(z.string(), z.unknown()).optional(),
+      error: z
+        .object({
+          message: z.string().min(1),
+          stack: z.string().optional(),
+        })
+        .optional(),
+    })
+    .strict();
+
   beforeEach(() => {
     jest.useFakeTimers();
     process.env.CONTRACT_ID = "CTEST123";
+    process.env.EVENT_LISTENER_LOG_LEVEL = "debug";
   });
 
   afterEach(() => {
     stopEventListener();
     jest.useRealTimers();
     delete process.env.CONTRACT_ID;
+    delete process.env.EVENT_LISTENER_LOG_LEVEL;
   });
 
   it("starts and stops without error", () => {
@@ -52,5 +76,38 @@ describe("contractEventListener", () => {
     startEventListener(1000);
     stopEventListener();
     expect(() => stopEventListener()).not.toThrow();
+  });
+
+  it("creates structured logs within runtime schema boundaries", () => {
+    const event = {
+      ledger: 25,
+      id: "evt-123",
+    } as any;
+
+    const log = createEventLogEntry("contract.event.received", event, {
+      key: "loan/requested",
+    });
+
+    expect(() => runtimeLogSchema.parse(log)).not.toThrow();
+    expect(log.eventType).toBe("contract.event.received");
+    expect(log.contractId).toBe("CTEST123");
+    expect(log.ledger).toBe(25);
+    expect(log.correlationId).toBe("evt-123");
+  });
+
+  it("logs errors with stack nested in isolated error object", () => {
+    const event = { ledger: 33 } as any;
+    const error = new Error("parse failed");
+    error.stack = "stack-trace-line";
+
+    const log = createEventLogEntry("contract.event.parse_error", event, undefined, error);
+
+    expect(() => runtimeLogSchema.parse(log)).not.toThrow();
+    expect(log).toHaveProperty("error");
+    expect(log.error).toMatchObject({
+      message: "parse failed",
+      stack: "stack-trace-line",
+    });
+    expect((log as any).stack).toBeUndefined();
   });
 });

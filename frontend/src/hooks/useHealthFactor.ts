@@ -1,27 +1,28 @@
-"use client";
-import { useEffect, useRef, useState, useCallback } from "react";
+'use client';
+import { useEffect, useRef, useState, useCallback } from 'react';
 
 const POLL_INTERVAL = 30_000;
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
 export function useHealthFactor(loanId: string) {
   const [healthFactor, setHealthFactor] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetch_ = useCallback(async () => {
     if (!loanId) return;
     setLoading(true);
+    setError(null);
     try {
-      const res = await fetch(
-        `${API}/api/health/${loanId}`
-      );
+      const res = await fetch(`${API}/api/health/${loanId}`);
+      if (!res.ok) throw new Error(`Server error: ${res.status}`);
       const data = await res.json();
       setHealthFactor(Number(data.health_factor ?? 0));
       setLastUpdated(new Date());
-    } catch {
-      // keep stale value on error
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to fetch health factor');
     } finally {
       setLoading(false);
     }
@@ -30,7 +31,7 @@ export function useHealthFactor(loanId: string) {
   const startPolling = useCallback(() => {
     if (timerRef.current) clearInterval(timerRef.current);
     timerRef.current = setInterval(() => {
-      if (document.visibilityState === "visible") fetch_();
+      if (document.visibilityState === 'visible') fetch_();
     }, POLL_INTERVAL);
   }, [fetch_]);
 
@@ -40,15 +41,15 @@ export function useHealthFactor(loanId: string) {
     startPolling();
 
     const onVisibility = () => {
-      if (document.visibilityState === "visible") fetch_();
+      if (document.visibilityState === 'visible') fetch_();
     };
-    document.addEventListener("visibilitychange", onVisibility);
+    document.addEventListener('visibilitychange', onVisibility);
 
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
-      document.removeEventListener("visibilitychange", onVisibility);
+      document.removeEventListener('visibilitychange', onVisibility);
     };
   }, [loanId, fetch_, startPolling]);
 
-  return { healthFactor, loading, lastUpdated, refresh: fetch_ };
+  return { healthFactor, loading, error, lastUpdated, refresh: fetch_ };
 }

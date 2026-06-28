@@ -1,11 +1,12 @@
-"use client";
-import { useState, useEffect } from "react";
-import { useRouter, useParams } from "next/navigation";
-import WalletConnect from "@/components/WalletConnect";
-import Card from "@/components/Card";
-import Skeleton from "@/components/Skeleton";
+'use client';
+import { useState, useEffect, useCallback } from 'react';
+import { useRouter, useParams } from 'next/navigation';
+import WalletConnect from '@/components/WalletConnect';
+import Card from '@/components/Card';
+import Skeleton from '@/components/Skeleton';
+import ErrorState from '@/components/ErrorState';
 
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
 interface Collateral {
   id: string;
@@ -25,9 +26,9 @@ interface Loan {
 }
 
 const ANIMAL_ICONS: Record<string, string> = {
-  cattle: "🐄",
-  goat: "🐐",
-  sheep: "🐑",
+  cattle: '🐄',
+  goat: '🐐',
+  sheep: '🐑',
 };
 
 function DetailSkeleton() {
@@ -62,27 +63,26 @@ export default function CollateralDetailPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (wallet && collateralId) {
-      fetchDetails();
-    }
-  }, [wallet, collateralId]);
-
-  async function fetchDetails() {
+  const fetchDetails = useCallback(async () => {
+    if (!wallet || !collateralId) return;
     setLoading(true);
     setError(null);
     try {
       const res = await fetch(`${API}/api/collateral/${collateralId}?owner=${wallet}`);
-      if (!res.ok) throw new Error("Failed to fetch collateral details");
+      if (!res.ok) throw new Error(`Server error: ${res.status}`);
       const data = await res.json();
       setCollateral(data.collateral);
       setLoans(data.loans || []);
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to load collateral details');
     } finally {
       setLoading(false);
     }
-  }
+  }, [wallet, collateralId]);
+
+  useEffect(() => {
+    fetchDetails();
+  }, [fetchDetails]);
 
   if (!wallet) {
     return (
@@ -104,19 +104,20 @@ export default function CollateralDetailPage() {
   if (error || !collateral) {
     return (
       <main className="max-w-2xl mx-auto px-4 py-10">
-        <button onClick={() => router.back()} className="text-brown-600 hover:text-brown-700 mb-6 font-semibold">
+        <button
+          onClick={() => router.back()}
+          className="text-brown-600 hover:text-brown-700 mb-6 font-semibold"
+        >
           ← Back
         </button>
-        <Card variant="warning">
-          <p className="text-error-dark">{error || "Collateral not found"}</p>
-        </Card>
+        <ErrorState message={error || 'Collateral not found'} onRetry={fetchDetails} />
       </main>
     );
   }
 
   const xlmValue = (collateral.appraised_value / 1e7).toFixed(2);
   const usdValue = (parseFloat(xlmValue) * 0.12).toFixed(2);
-  const icon = ANIMAL_ICONS[collateral.animal_type] || "🐾";
+  const icon = ANIMAL_ICONS[collateral.animal_type] || '🐾';
 
   // Derive outstanding balance and a simple health factor from loans
   const totalOutstanding = loans.reduce((sum, l) => sum + l.amount, 0);
@@ -130,7 +131,10 @@ export default function CollateralDetailPage() {
 
   return (
     <main className="max-w-2xl mx-auto px-4 py-10">
-      <button onClick={() => router.back()} className="text-brown-600 hover:text-brown-700 mb-6 font-semibold">
+      <button
+        onClick={() => router.back()}
+        className="text-brown-600 hover:text-brown-700 mb-6 font-semibold"
+      >
         ← Back to Collateral
       </button>
 
@@ -138,7 +142,9 @@ export default function CollateralDetailPage() {
       {isAtRisk && (
         <Card variant="warning" className="mb-4">
           <div className="flex items-center gap-3">
-            <span className="text-2xl" aria-hidden="true">⚠️</span>
+            <span className="text-2xl" aria-hidden="true">
+              ⚠️
+            </span>
             <div>
               <p className="font-bold text-warning-dark">Liquidation Risk</p>
               <p className="text-sm text-warning-dark/80">
@@ -151,7 +157,7 @@ export default function CollateralDetailPage() {
 
       {/* Primary metrics — large, prominent */}
       <div className="grid grid-cols-2 gap-4 mb-4">
-        <Card variant={isAtRisk ? "warning" : "highlighted"}>
+        <Card variant={isAtRisk ? 'warning' : 'highlighted'}>
           <p className="text-xs font-medium text-brown-500 uppercase tracking-wide mb-1">
             Health Factor
           </p>
@@ -161,7 +167,11 @@ export default function CollateralDetailPage() {
                 {(healthFactorBps / 10000).toFixed(2)}
               </p>
               <p className="text-xs text-brown-500 mt-1">
-                {healthFactorBps >= 15000 ? "Healthy" : healthFactorBps >= 12000 ? "Moderate" : "At Risk"}
+                {healthFactorBps >= 15000
+                  ? 'Healthy'
+                  : healthFactorBps >= 12000
+                    ? 'Moderate'
+                    : 'At Risk'}
               </p>
             </>
           ) : (
@@ -173,9 +183,7 @@ export default function CollateralDetailPage() {
           <p className="text-xs font-medium text-brown-500 uppercase tracking-wide mb-1">
             Outstanding Balance
           </p>
-          <p className="text-4xl font-bold text-brown-700 dark:text-cream-50">
-            {outstandingXlm}
-          </p>
+          <p className="text-4xl font-bold text-brown-700 dark:text-cream-50">{outstandingXlm}</p>
           <p className="text-xs text-brown-500 mt-1">XLM</p>
         </Card>
       </div>
@@ -188,7 +196,9 @@ export default function CollateralDetailPage() {
             <span className="text-4xl">{icon}</span>
             <h1 className="text-2xl font-bold text-brown-700 dark:text-cream-50 capitalize">
               {collateral.animal_type}
-              <span className="ml-2 text-base font-normal text-brown-500">× {collateral.count}</span>
+              <span className="ml-2 text-base font-normal text-brown-500">
+                × {collateral.count}
+              </span>
             </h1>
           </div>
         }
@@ -226,7 +236,13 @@ export default function CollateralDetailPage() {
 
       {/* Associated loans */}
       {loans.length > 0 ? (
-        <Card header={<h2 className="text-lg font-semibold text-brown-700 dark:text-cream-50">Associated Loans</h2>}>
+        <Card
+          header={
+            <h2 className="text-lg font-semibold text-brown-700 dark:text-cream-50">
+              Associated Loans
+            </h2>
+          }
+        >
           <div className="space-y-3">
             {loans.map((loan) => {
               const loanXlm = (loan.amount / 1e7).toFixed(2);
@@ -245,7 +261,7 @@ export default function CollateralDetailPage() {
                     </span>
                   </div>
                   <p className="text-lg font-bold text-brown-700 dark:text-cream-50 mt-1">
-                    {loanXlm} XLM{" "}
+                    {loanXlm} XLM{' '}
                     <span className="text-sm font-normal text-brown-500">(${loanUsd})</span>
                   </p>
                 </div>
@@ -257,7 +273,7 @@ export default function CollateralDetailPage() {
         <Card className="text-center">
           <p className="text-brown-500 mb-4">No loans associated with this collateral</p>
           <button
-            onClick={() => router.push("/borrow")}
+            onClick={() => router.push('/borrow')}
             className="bg-brown-600 text-cream-50 px-6 py-2 rounded-lg font-semibold hover:bg-brown-700 transition"
           >
             Request a Loan

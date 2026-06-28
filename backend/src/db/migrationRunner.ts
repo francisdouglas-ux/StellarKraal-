@@ -58,6 +58,7 @@ export async function runMigrations(): Promise<void> {
 /**
  * Get migration status
  * Shows which migrations have been applied and which are pending
+ * @returns A string describing the current migration status.
  */
 export async function getMigrationStatus(): Promise<string> {
   try {
@@ -75,6 +76,7 @@ export async function getMigrationStatus(): Promise<string> {
 /**
  * Check database connectivity by running a trivial query against the SQLite file.
  * Returns true if the DB is reachable, false otherwise.
+ * @returns A promise that resolves to true if the database is healthy, false otherwise.
  */
 export async function checkDbHealth(): Promise<boolean> {
   try {

@@ -2,6 +2,7 @@
 import { useWizard, AnimalType } from "@/context/LoanWizardContext";
 import { signTransaction } from "@/lib/freighterClient";
 import { submitSignedXdr } from "@/lib/stellarUtils";
+import { invalidateCollateral } from "@/lib/api";
 import Spinner from "@/components/Spinner";
 
 const ANIMAL_TYPES: { value: AnimalType; label: string; emoji: string; desc: string }[] = [
@@ -48,6 +49,8 @@ export default function StepCollateral({ walletAddress }: Props) {
         network: process.env.NEXT_PUBLIC_NETWORK || "TESTNET",
       });
       const collateralId = await submitSignedXdr(signedTxXdr);
+      // New collateral registered — drop cached collateral lists so they revalidate.
+      invalidateCollateral();
       setField("collateralId", String(collateralId));
       nextStep();
     } catch (e: any) {

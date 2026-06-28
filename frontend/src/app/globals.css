@@ -18,6 +18,32 @@
   --color-nav-border: rgba(61, 40, 16, 0.1);
   --color-skeleton-base: #e8ddd0;
   --color-skeleton-shine: #f5ede0;
+
+  /* ── Semantic design tokens — light (#297) ── */
+  --token-primary:          #5D3C15;
+  --token-primary-hover:    #3D2810;
+  --token-on-primary:       #FFFFFF;
+  --token-secondary:        #B45309;
+  --token-secondary-hover:  #92400E;
+  --token-on-secondary:     #FFFFFF;
+  --token-accent:           #D97706;
+  --token-danger:           #DC2626;
+  --token-danger-subtle:    #FEE2E2;
+  --token-on-danger:        #FFFFFF;
+  --token-success:          #16A34A;
+  --token-success-subtle:   #D4F4DD;
+  --token-on-success:       #FFFFFF;
+  --token-warning:          #D97706;
+  --token-warning-subtle:   #FEF3C7;
+  --token-on-warning:       #FFFFFF;
+  --token-surface:          #FDF6EC;
+  --token-surface-raised:   #FFFFFF;
+  --token-text:             #3D2810;
+  --token-text-subtle:      #5D3C15;
+  --token-text-muted:       #8B5A1F;
+  --token-text-inverse:     #FFFFFF;
+  --token-border:           #F0D9B8;
+  --token-border-strong:    #D4A05A;
 }
 
 /* ── Dark mode CSS variables ── */
@@ -36,6 +62,32 @@
   --color-nav-border: rgba(240, 217, 184, 0.1);
   --color-skeleton-base: #3D2810;
   --color-skeleton-shine: #5D3C15;
+
+  /* ── Semantic design tokens — dark (#297) ── */
+  --token-primary:          #F0D9B8;
+  --token-primary-hover:    #FDF6EC;
+  --token-on-primary:       #1A1007;
+  --token-secondary:        #FBDC7D;
+  --token-secondary-hover:  #FDEAB3;
+  --token-on-secondary:     #1A1007;
+  --token-accent:           #F8CA47;
+  --token-danger:           #F87171;
+  --token-danger-subtle:    #450A0A;
+  --token-on-danger:        #FFFFFF;
+  --token-success:          #4ADE80;
+  --token-success-subtle:   #052E16;
+  --token-on-success:       #FFFFFF;
+  --token-warning:          #FBD049;
+  --token-warning-subtle:   #451A03;
+  --token-on-warning:       #1A1007;
+  --token-surface:          #2A1B0B;
+  --token-surface-raised:   #2A1B0B;
+  --token-text:             #FDF6EC;
+  --token-text-subtle:      #F0D9B8;
+  --token-text-muted:       #D4A05A;
+  --token-text-inverse:     #1A1007;
+  --token-border:           #3D2810;
+  --token-border-strong:    #5D3C15;
 }
 
 /* ── Base styles using variables ── */
@@ -107,6 +159,58 @@ body {
   );
   background-size: 200% 100%;
   animation: shimmer 1.4s ease-in-out infinite;
+}
+
+/* ── Typography component classes (#298) ── */
+@layer components {
+  .text-h1 {
+    font-size: 2.25rem;
+    line-height: 2.5rem;
+    font-weight: 700;
+    color: var(--token-text);
+  }
+  .text-h2 {
+    font-size: 1.875rem;
+    line-height: 2.25rem;
+    font-weight: 700;
+    color: var(--token-text);
+  }
+  .text-h3 {
+    font-size: 1.5rem;
+    line-height: 2rem;
+    font-weight: 600;
+    color: var(--token-text);
+  }
+  .text-h4 {
+    font-size: 1.25rem;
+    line-height: 1.75rem;
+    font-weight: 600;
+    color: var(--token-text);
+  }
+  .text-body {
+    font-size: 1rem;
+    line-height: 1.5rem;
+    font-weight: 400;
+    color: var(--token-text);
+  }
+  .text-body-sm {
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+    font-weight: 400;
+    color: var(--token-text-subtle);
+  }
+  .text-caption {
+    font-size: 0.75rem;
+    line-height: 1rem;
+    font-weight: 400;
+    color: var(--token-text-muted);
+  }
+  .text-label {
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+    font-weight: 500;
+    color: var(--token-text-subtle);
+  }
 }
 
 /* ── Toast animations ── */

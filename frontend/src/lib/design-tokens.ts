@@ -72,6 +72,23 @@ export const colors = {
   }
 } as const;
 
+// ── Typography tokens (#298) ─────────────────────────────────────────────────
+
+export const typography = {
+  heading: {
+    h1: "text-h1",
+    h2: "text-h2",
+    h3: "text-h3",
+    h4: "text-h4",
+  },
+  body: {
+    default: "text-body",
+    sm: "text-body-sm",
+  },
+  caption: "text-caption",
+  label: "text-label",
+} as const;
+
 // Utility function to get contrast-compliant color combinations
 export function getContrastPair(background: 'light' | 'dark' = 'light') {
   return background === 'light' 

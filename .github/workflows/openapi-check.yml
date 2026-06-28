@@ -4,8 +4,11 @@ on:
   pull_request:
     paths:
       - "backend/src/routes/**"
+      - "backend/src/services/**"
+      - "backend/src/middleware/deprecation.ts"
       - "backend/src/index.ts"
       - "backend/openapi.json"
+      - "backend/package.json"
   push:
     branches:
       - main
@@ -26,3 +29,14 @@ jobs:
             exit 1
           fi
           echo "openapi.json present"
+
+      - name: Verify info.version matches package.json
+        run: |
+          PKG_VERSION=$(node -p "require('./backend/package.json').version")
+          SPEC_VERSION=$(node -p "require('./backend/openapi.json').info.version")
+          if [ "$PKG_VERSION" != "$SPEC_VERSION" ]; then
+            echo "ERROR: openapi.json info.version ($SPEC_VERSION) does not match backend/package.json ($PKG_VERSION)."
+            echo "Run: cd backend && npm run openapi:sync"
+            exit 1
+          fi
+          echo "info.version matches package.json ($PKG_VERSION)"

@@ -1,6 +1,7 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
+import FocusTrap from "focus-trap-react";
 
 interface OnboardingModalProps {
   isOpen: boolean;
@@ -62,10 +63,16 @@ const ONBOARDING_STEPS = [
 export default function OnboardingModal({ isOpen, onClose }: OnboardingModalProps) {
   const router = useRouter();
   const [currentStep, setCurrentStep] = useState(0);
+  const triggerRef = useRef<Element | null>(null);
 
   // Reset to first step each time the modal opens
   useEffect(() => {
-    if (isOpen) setCurrentStep(0);
+    if (isOpen) {
+      setCurrentStep(0);
+      triggerRef.current = document.activeElement;
+    } else {
+      (triggerRef.current as HTMLElement | null)?.focus();
+    }
   }, [isOpen]);
 
   const handleNext = () => {
@@ -102,20 +109,27 @@ export default function OnboardingModal({ isOpen, onClose }: OnboardingModalProp
   const isLast = currentStep === ONBOARDING_STEPS.length - 1;
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="onboarding-title"
-      className="fixed inset-0 bg-brown-900/80 flex items-center justify-center z-50 p-4"
-    >
-      <div className="bg-cream-50 dark:bg-brown-800 rounded-2xl max-w-md w-full p-6 relative">
-        <button
-          onClick={handleSkip}
-          aria-label="Skip onboarding"
-          className="absolute top-4 right-4 text-brown-500 hover:text-brown-700 dark:text-brown-300 dark:hover:text-brown-100 text-xl leading-none"
-        >
-          ×
-        </button>
+    <FocusTrap active={isOpen} focusTrapOptions={{ allowOutsideClick: true, escapeDeactivates: false }}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="onboarding-title"
+        className="fixed inset-0 bg-brown-900/80 flex items-center justify-center z-50 p-4"
+        onKeyDown={(e) => {
+          if (e.key === "Escape") {
+            e.stopPropagation();
+            onClose();
+          }
+        }}
+      >
+        <div className="bg-cream-50 dark:bg-brown-800 rounded-2xl max-w-md w-full p-6 relative">
+          <button
+            onClick={handleSkip}
+            aria-label="Skip onboarding"
+            className="absolute top-4 right-4 text-brown-500 hover:text-brown-700 dark:text-brown-300 dark:hover:text-brown-100 text-xl leading-none"
+          >
+            ×
+          </button>
 
         <div className="text-center">
           <div className="mb-6 text-gold-600">{step.illustration}</div>
@@ -156,7 +170,8 @@ export default function OnboardingModal({ isOpen, onClose }: OnboardingModalProp
             </button>
           </div>
         </div>
+        </div>
       </div>
-    </div>
+    </FocusTrap>
   );
 }

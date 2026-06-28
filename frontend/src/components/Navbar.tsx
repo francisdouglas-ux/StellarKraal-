@@ -1,8 +1,9 @@
 "use client";
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import ThemeToggle from "./ThemeToggle";
+import { useWallet } from "@/hooks/useWallet";
 
 const NAV_SECTIONS = [
   { href: "/dashboard", label: "Dashboard", icon: "⊞" },
@@ -118,12 +119,6 @@ export default function Navbar() {
                   href={href}
                   aria-current={active ? "page" : undefined}
                   onClick={() => setOpen(false)}
-                  className={`flex items-center gap-2 px-4 min-h-[44px] font-medium transition ${
-                    active
-                      ? "bg-[var(--color-border)] text-[var(--color-text)]"
-                      : "hover:bg-[var(--color-border)]"
-                  }`}
-                  style={{ color: "var(--color-text)" }}
                   className={`flex items-center gap-2 px-4 min-h-[44px] transition
                     ${active ? 'bg-brown text-cream font-bold' : 'text-brown/70 font-medium hover:bg-brown/5 hover:text-brown'}`}
                 >

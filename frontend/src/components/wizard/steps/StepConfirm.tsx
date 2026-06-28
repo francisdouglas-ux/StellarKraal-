@@ -4,6 +4,7 @@ import { useWizard } from '@/context/LoanWizardContext';
 import { useButtonState } from '@/hooks/useButtonState';
 import { signTransaction } from '@/lib/freighterClient';
 import { submitSignedXdr } from '@/lib/stellarUtils';
+import { invalidateLoans } from '@/lib/api';
 import { Button } from '@/components/ui';
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
@@ -60,6 +61,8 @@ export default function StepConfirm({ walletAddress }: Props) {
       });
       const result = await submitSignedXdr(signedTxXdr);
       setLoanId(String(result));
+      // New loan created — drop cached loan lists so they revalidate.
+      invalidateLoans();
       submitButton.setSuccess();
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Something went wrong.';

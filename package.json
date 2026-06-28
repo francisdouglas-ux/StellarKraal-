@@ -7,6 +7,8 @@
     "test:backend": "cd backend && npm test",
     "test:frontend": "cd frontend && npm test",
     "verify:deployment": "NODE_PATH=./backend/node_modules npx ts-node --project scripts/tsconfig.json scripts/verify-deployment.ts",
+    "secret:scan": "gitleaks dir --config .gitleaks.toml --redact .",
+    "secret:scan:staged": "git diff --cached --patch --binary | gitleaks stdin --config .gitleaks.toml --redact",
     "prepare": "husky"
   },
   "devDependencies": {
