@@ -13,6 +13,12 @@
     "port": { "ENV": "DB_PORT" },
     "database": { "ENV": "DB_NAME" },
     "user": { "ENV": "DB_USER" },
-    "password": { "ENV": "DB_PASSWORD" }
+    "password": { "ENV": "DB_PASSWORD" },
+    "pool": { "max": 10, "min": 1 }
+  },
+  "staging": {
+    "driver": "pg",
+    "url": { "ENV": "DATABASE_URL" },
+    "pool": { "max": 10, "min": 1 }
   }
 }

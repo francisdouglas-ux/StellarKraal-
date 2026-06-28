@@ -3,6 +3,7 @@ import { fireAlert } from "./alerting";
 import { rules } from "./alertRules";
 import { pool } from "./connectionPool";
 import logger from "./logger";
+import { getCorrelationId } from "./correlationContext";
 
 /**
  * Circuit breaker options:
@@ -24,22 +25,32 @@ const circuitBreakerOptions = {
 };
 
 /**
- * Wrapped RPC methods with connection pooling + retry logic
+ * Wrapped RPC methods with connection pooling + retry logic.
+ * correlationId from AsyncLocalStorage is included in structured logs
+ * and forwarded as X-Correlation-ID metadata on each RPC call.
  */
 const rpcMethods = {
   getAccount: async (address: string) => {
+    const correlationId = getCorrelationId();
+    logger.debug("RPC getAccount", { address, correlationId });
     return pool.run((server) => server.getAccount(address));
   },
 
   prepareTransaction: async (tx: any) => {
+    const correlationId = getCorrelationId();
+    logger.debug("RPC prepareTransaction", { correlationId });
     return pool.run((server) => server.prepareTransaction(tx));
   },
 
   simulateTransaction: async (tx: any) => {
+    const correlationId = getCorrelationId();
+    logger.debug("RPC simulateTransaction", { correlationId });
     return pool.run((server) => server.simulateTransaction(tx));
   },
 
   getHealth: async () => {
+    const correlationId = getCorrelationId();
+    logger.debug("RPC getHealth", { correlationId });
     return pool.run((server) => server.getHealth());
   },
 };
@@ -72,26 +83,27 @@ const getHealthBreaker = new CircuitBreaker(
   getHealthBreaker,
 ].forEach((breaker) => {
   breaker.on("open", () => {
-    logger.error("Circuit breaker opened", { breaker: breaker.name });
+    logger.error("Circuit breaker opened", { breaker: breaker.name, correlationId: getCorrelationId() });
     fireAlert(rules.rpcCircuitOpen, `Circuit breaker opened for ${breaker.name}`, {
       breaker: breaker.name,
     });
   });
 
   breaker.on("halfOpen", () => {
-    logger.info("Circuit breaker half-open", { breaker: breaker.name });
+    logger.info("Circuit breaker half-open", { breaker: breaker.name, correlationId: getCorrelationId() });
   });
 
   breaker.on("close", () => {
-    logger.info("Circuit breaker closed", { breaker: breaker.name });
+    logger.info("Circuit breaker closed", { breaker: breaker.name, correlationId: getCorrelationId() });
   });
 
   breaker.on("failure", (error: Error) => {
+    const correlationId = getCorrelationId();
     fireAlert(rules.rpcFailure, `RPC call failed: ${error.message}`, {
       breaker: breaker.name,
       error: error.message,
     });
-    logger.warn(`RPC call failed: ${error.message}`, { breaker: breaker.name, error: error.message });
+    logger.warn(`RPC call failed: ${error.message}`, { breaker: breaker.name, error: error.message, correlationId });
   });
 });
 

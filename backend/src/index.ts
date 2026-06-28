@@ -10,16 +10,11 @@ import {
   softDeleteCollateral,
   restoreCollateral,
   listDeletedCollateral,
-  insertLoan,
-  listLoans,
-  getLoan,
   softDeleteLoan,
   restoreLoan,
   listDeletedLoans,
-  insertTransaction,
   listTransactions,
   getTransaction,
-  updateTransaction,
   type TransactionType,
   type TransactionStatus,
 } from "./db/store";
@@ -52,6 +47,8 @@ import { asyncHandler } from "./utils/asyncHandler";
 import { stellarPublicKeySchema } from "./validators/stellar";
 import rpcClient from "./utils/rpcClient";
 import { registerWebhook, getWebhooks, getDeliveryLogs, fireWebhooks } from "./webhooks";
+import { runWithCorrelationId } from "./utils/correlationContext";
+import { dbHealth } from "./db/database";
 import { fireAlert } from "./utils/alerting";
 import { rules } from "./utils/alertRules";
 import {
@@ -110,13 +107,16 @@ app.use(express.json());
 app.use(globalLimiter);
 app.use(timeoutMiddleware(parseInt(config.TIMEOUT_GLOBAL_MS, 10)));
 
-// Request ID middleware
+// Request ID + correlation context middleware
 app.use((req: Request, res: Response, next: NextFunction) => {
   const requestId = randomUUID();
   (req as any).requestId = requestId;
   (req as any).logger = createRequestLogger(requestId);
   res.setHeader("X-Request-ID", requestId);
-  next();
+  // Also accept X-Correlation-ID from upstream; fall back to requestId
+  const correlationId = (req.headers["x-correlation-id"] as string) || requestId;
+  res.setHeader("X-Correlation-ID", correlationId);
+  runWithCorrelationId(correlationId, next);
 });
 
 // Shutdown middleware - reject new requests during graceful shutdown
@@ -368,6 +368,8 @@ app.get(
       const circuitStates = rpcClient.getCircuitStates();
       const circuitHealthy = rpcClient.isHealthy();
 
+      const dbStatus = await dbHealth();
+
       const healthData = {
         status: rpcReachable && circuitHealthy ? "healthy" : "degraded",
         version: APP_VERSION,
@@ -378,6 +380,7 @@ app.get(
           states: circuitStates,
         },
         pool: pool.stats(),
+        database: dbStatus,
       };
 
       res.status(rpcReachable && circuitHealthy ? 200 : 503).json(healthData);
@@ -457,13 +460,14 @@ app.post(
       }
     }
 
+    const loanId = randomUUID();
     const xdrTx = await buildContractTx(borrower, "request_loan", [
       new Address(borrower).toScVal(),
       nativeToScVal(BigInt(collateral_id), { type: "u64" }),
       nativeToScVal(BigInt(amount), { type: "i128" }),
     ]);
-    fireWebhooks("loan.approved", { borrower, collateral_id, amount });
-    res.json({ xdr: xdrTx, ...(cached?.stale ? { stale: true } : {}) });
+    fireWebhooks("loan.activated", { loanId, borrower, amount, timestamp: Date.now() });
+    res.json({ xdr: xdrTx, loanId, ...(cached?.stale ? { stale: true } : {}) });
   }),
 );
 
@@ -509,8 +513,34 @@ app.post(
     ]);
     const body = { xdr: xdrTx };
     setIdempotencyEntry(idempotencyKey, 200, body);
-    fireWebhooks("loan.repaid", { borrower, loan_id, amount });
+    fireWebhooks("loan.repaid", { loanId: String(loan_id), borrower, amount, timestamp: Date.now() });
     res.json(body);
+  }),
+);
+
+// POST /api/loan/liquidate
+const loanLiquidateSchema = z.object({
+  borrower: stellarPublicKeySchema,
+  loan_id: z.number().int().nonnegative(),
+  amount: z.number().int().positive(),
+});
+
+app.post(
+  "/api/loan/liquidate",
+  timeoutMiddleware(parseInt(config.TIMEOUT_WRITE_MS, 10)),
+  asyncHandler(async (req: Request, res: Response) => {
+    const validation = loanLiquidateSchema.safeParse(req.body);
+    if (!validation.success) {
+      return res.status(400).json({ error: "Validation failed", details: validation.error.issues });
+    }
+    const { borrower, loan_id, amount } = validation.data;
+    const xdrTx = await buildContractTx(borrower, "liquidate_loan", [
+      new Address(borrower).toScVal(),
+      nativeToScVal(BigInt(loan_id), { type: "u64" }),
+      nativeToScVal(BigInt(amount), { type: "i128" }),
+    ]);
+    fireWebhooks("loan.liquidated", { loanId: String(loan_id), borrower, amount, timestamp: Date.now() });
+    res.json({ xdr: xdrTx });
   }),
 );
 
@@ -901,6 +931,7 @@ app.get(
 );
 
 // ── error handler ─────────────────────────────────────────────────────────────
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
   const reqLogger = (req as any).logger || logger;
   if (err instanceof PoolExhaustedError) {

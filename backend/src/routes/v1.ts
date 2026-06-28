@@ -161,7 +161,7 @@ v1Router.post(
       idsScVal,
       nativeToScVal(BigInt(amount), { type: "i128" }),
     ]);
-    fireWebhooks("loan.approved", { borrower, collateral_ids, amount });
+    fireWebhooks("loan.activated", { loanId: String(collateral_ids[0]), borrower, amount, timestamp: Date.now() });
     res.json({ xdr: xdrTx });
   })
 );
@@ -182,7 +182,7 @@ v1Router.post(
       nativeToScVal(BigInt(loan_id), { type: "u64" }),
       nativeToScVal(BigInt(amount), { type: "i128" }),
     ]);
-    fireWebhooks("loan.repaid", { borrower, loan_id, amount });
+    fireWebhooks("loan.repaid", { loanId: String(loan_id), borrower, amount, timestamp: Date.now() });
     res.json({ xdr: xdrTx });
   })
 );
@@ -203,7 +203,7 @@ v1Router.post(
       nativeToScVal(BigInt(loan_id), { type: "u64" }),
       nativeToScVal(BigInt(repay_amount), { type: "i128" }),
     ]);
-    fireWebhooks("loan.liquidated", { liquidator, loan_id, repay_amount });
+    fireWebhooks("loan.liquidated", { loanId: String(loan_id), borrower: liquidator, amount: repay_amount, timestamp: Date.now() });
     res.json({ xdr: xdrTx });
   })
 );

@@ -26,6 +26,8 @@ const envSchema = z.object({
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
   // Frontend URL for CORS
   FRONTEND_URL: z.string().url("FRONTEND_URL must be a valid URL").optional(),
+  // Database URL — switches between SQLite (unset) and PostgreSQL (postgres://...)
+  DATABASE_URL: z.string().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);
