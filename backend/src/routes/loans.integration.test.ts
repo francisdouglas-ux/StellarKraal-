@@ -20,7 +20,7 @@ jest.mock("../utils/logger", () => ({
 // Disable rate limiting in tests
 jest.mock("../middleware/rateLimit", () => {
   const noop = (_req: any, _res: any, next: any) => next();
-  return { globalLimiter: noop, authLimiter: noop, writeLimiter: noop };
+  return { globalLimiter: noop, authLimiter: noop, writeLimiter: noop, readLimiter: noop };
 });
 
 const _MOCK_ADDR = "GASPH4OCYOERATXIKLPNURXUP7ISAQU2KWFB5XLUJ3LQHKHOCN3CEGD6";
@@ -51,10 +51,12 @@ jest.mock("../utils/rpcClient", () => ({
 }));
 
 jest.mock("@stellar/stellar-sdk", () => {
-  // Keep StrKey so the Stellar public key validator works
-  const { StrKey } = jest.requireActual("@stellar/stellar-sdk");
   return {
-    StrKey,
+    StrKey: {
+      // Only valid 56-char G-prefixed keys pass
+      isValidEd25519PublicKey: (key: string) =>
+        typeof key === "string" && key.length === 56 && key.startsWith("G"),
+    },
     Networks: {
       TESTNET: "Test SDF Network ; September 2015",
       PUBLIC: "Public Global Stellar Network ; September 2015",
@@ -73,7 +75,10 @@ jest.mock("@stellar/stellar-sdk", () => {
     })),
     nativeToScVal: jest.fn().mockReturnValue({}),
     xdr: {
-      ScVal: { scvVec: jest.fn((arr: any) => ({ type: "vec", value: arr })) },
+      ScVal: {
+        scvVec: jest.fn((arr: any) => ({ type: "vec", value: arr })),
+        scvVoid: jest.fn(() => ({ type: "void" })),
+      },
     },
   };
 });
@@ -451,7 +456,60 @@ describe("Full loan lifecycle integration", () => {
   });
 });
 
-// ── Liquidation acceptance criteria (issue #293) ──────────────────────────────
+// ── GET /api/v1/loans/:id/outstanding (issue #589) ────────────────────────────
+
+describe("GET /api/v1/loans/:id/outstanding", () => {
+  let app: Express;
+
+  beforeEach(() => {
+    app = createApp();
+    seedCollateral("out-col-1");
+  });
+
+  it("returns 200 with principal, interest, total, asOf for an active loan", async () => {
+    seedLoan("out-loan-1", "out-col-1", 600_000);
+
+    const res = await request(app).get("/api/v1/loans/out-loan-1/outstanding");
+
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty("principal", 600_000);
+    expect(res.body).toHaveProperty("interest");
+    expect(res.body).toHaveProperty("total");
+    expect(res.body).toHaveProperty("asOf");
+    expect(typeof res.body.interest).toBe("number");
+    expect(res.body.interest).toBeGreaterThanOrEqual(0);
+    expect(res.body.total).toBe(res.body.principal + res.body.interest);
+    expect(res.body).toHaveProperty("api_version", "v1");
+  });
+
+  it("returns 200 for a repaid loan (still computes accrued interest up to now)", async () => {
+    const loan = insertLoan({ id: "out-loan-repaid", borrower: VALID_ADDRESS, collateral_id: "out-col-1", amount: 300_000, status: "repaid" });
+
+    const res = await request(app).get(`/api/v1/loans/${loan.id}/outstanding`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.principal).toBe(300_000);
+    expect(res.body.total).toBeGreaterThanOrEqual(300_000);
+  });
+
+  it("returns 404 when loan does not exist", async () => {
+    const res = await request(app).get("/api/v1/loans/nonexistent-id/outstanding");
+
+    expect(res.status).toBe(404);
+    expect(res.body).toHaveProperty("error");
+  });
+
+  it("returns 200 and interest >= 0 regardless of elapsed time", async () => {
+    seedLoan("out-loan-2", "out-col-1", 1_000_000);
+
+    const res = await request(app).get("/api/v1/loans/out-loan-2/outstanding");
+
+    expect(res.status).toBe(200);
+    expect(res.body.interest).toBeGreaterThanOrEqual(0);
+    expect(res.body.total).toBeGreaterThanOrEqual(res.body.principal);
+  });
+});
+
 
 describe("POST /api/v1/loan/liquidate — health factor & state (issue #293)", () => {
   let app: Express;
