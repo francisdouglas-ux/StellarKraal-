@@ -33,6 +33,7 @@ import {
 import { fireAlert } from "../utils/alerting";
 import { rules } from "../utils/alertRules";
 import rpcClient from "../utils/rpcClient";
+import { healthRouter } from "./health";
 const CONTRACT_ID = process.env.CONTRACT_ID || "";
 const NETWORK_PASSPHRASE =
   config.NEXT_PUBLIC_NETWORK === "mainnet" ? Networks.PUBLIC : Networks.TESTNET;
@@ -106,7 +107,10 @@ v1Router.use((_req: Request, res: Response, next: NextFunction) => {
   next();
 });
 
-// GET /health
+// GET /health/deep — deep infrastructure health check (no auth, no rate limit)
+v1Router.use("/health", healthRouter);
+
+// GET /health — shallow liveness check
 v1Router.get("/health", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const uptime = Math.floor((Date.now() - startTime) / 1000);

@@ -65,6 +65,7 @@ import { scheduleHealthFactorJob } from "./jobs/healthFactorJob";
 import { httpActiveConnections, httpRequestDurationSeconds, httpRequestsTotal } from "./metrics";
 import { fireAlert } from "./utils/alerting";
 import { rules } from "./utils/alertRules";
+import { healthRouter } from "./routes/health";
 
 // ── 5xx spike tracking (rolling 60s window) ───────────────────────────────────
 const fivexxTimestamps: number[] = [];
@@ -121,6 +122,14 @@ app.get("/api/health", async (_req: Request, res: Response) => {
     timestamp: new Date().toISOString(),
   });
 });
+
+/**
+ * GET /api/v1/health/deep
+ * Deep infrastructure health check — verifies DB connectivity, RPC reachability, and disk space.
+ * Excluded from JWT auth and rate-limit middleware intentionally.
+ * @returns 200 { db, rpc, disk } if all components healthy; 503 if any are degraded.
+ */
+app.use("/api/v1/health", healthRouter);
 
 app.use(correlationMiddleware);
 // Request ID middleware
