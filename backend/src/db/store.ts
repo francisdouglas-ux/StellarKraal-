@@ -10,6 +10,7 @@
 export interface AppraisalEntry {
   date: string;
   value: number;
+  appraiser?: string;
 }
 export type CollateralStatus = "available" | "pledged" | "liquidated";
 
@@ -100,14 +101,39 @@ export function insertCollateral(
  * Add a new appraisal entry for an existing collateral record.
  * @param id - Collateral record ID.
  * @param value - New appraised value.
+ * @param appraiser - Optional appraiser wallet address.
  * @returns `true` if updated, `false` if not found or soft-deleted.
  */
-export function addAppraisal(id: string, value: number): boolean {
+export function addAppraisal(id: string, value: number, appraiser?: string): boolean {
   const r = collateralTable.get(id);
   if (!r || r.deletedAt !== null) return false;
   r.appraised_value = value;
-  r.appraisal_history.push({ date: new Date().toISOString(), value });
+  r.appraisal_history.push({ date: new Date().toISOString(), value, ...(appraiser ? { appraiser } : {}) });
   return true;
+}
+
+/**
+ * Return paginated appraisal history for a collateral record, ordered by date descending.
+ * @param id - Collateral record ID.
+ * @param page - Page number (1-indexed, default 1).
+ * @param limit - Records per page (default 20, max 100).
+ * @returns Paginated result or `null` if not found or soft-deleted.
+ */
+export function getAppraisalHistory(
+  id: string,
+  page = 1,
+  limit = 20,
+): { data: AppraisalEntry[]; total: number; page: number; limit: number } | null {
+  const r = collateralTable.get(id);
+  if (!r || r.deletedAt !== null) return null;
+  const sorted = [...r.appraisal_history].sort(
+    (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
+  );
+  const cappedLimit = Math.min(limit, 100);
+  const safePage = Math.max(page, 1);
+  const total = sorted.length;
+  const data = sorted.slice((safePage - 1) * cappedLimit, safePage * cappedLimit);
+  return { data, total, page: safePage, limit: cappedLimit };
 }
 
 /**

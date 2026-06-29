@@ -14,6 +14,8 @@ import {
   listDeletedCollateral,
   isCollateralPledged,
   getLoanSummaryForBorrower,
+  getAppraisalHistory,
+  addAppraisal,
   insertLoan,
   getLoan,
   listLoans,
@@ -1239,9 +1241,40 @@ app.put("/api/v1/collateral/:id/appraise", timeoutMiddleware(parseInt(config.TIM
   const record = getCollateral(req.params.id as string);
   if (!record) return res.status(404).json({ error: "Record not found" });
   record.appraised_value = appraised_value;
+  const appraiser = (req as Request & { user?: { publicKey?: string } }).user?.publicKey;
   setAppraisal(req.params.id as string, appraised_value);
+  addAppraisal(req.params.id as string, appraised_value, appraiser);
+  invalidateCache(`/api/v1/collateral/${req.params.id}/appraisals`);
   res.json(record);
 }));
+
+// GET /api/v1/collateral/:id/appraisals — paginated appraisal history
+app.get(
+  "/api/v1/collateral/:id/appraisals",
+  createResponseCacheMiddleware(5 * 60 * 1000),
+  asyncHandler(async (req: Request, res: Response) => {
+    const id = req.params.id as string;
+    const record = getCollateral(id);
+    if (!record) return res.status(404).json({ error: "Collateral not found" });
+
+    const user = (req as Request & { user?: { publicKey?: string; role?: string } }).user;
+    if (!user || (user.role !== "admin" && user.publicKey !== record.owner)) {
+      return res.status(404).json({ error: "Collateral not found" });
+    }
+
+    const pageRaw = req.query.page !== undefined ? Number(req.query.page) : 1;
+    const limitRaw = req.query.limit !== undefined ? Number(req.query.limit) : 20;
+    if (!Number.isInteger(pageRaw) || pageRaw < 1) {
+      return res.status(400).json({ error: "page must be a positive integer" });
+    }
+    if (!Number.isInteger(limitRaw) || limitRaw < 1 || limitRaw > 100) {
+      return res.status(400).json({ error: "limit must be between 1 and 100" });
+    }
+
+    const result = getAppraisalHistory(id, pageRaw, limitRaw)!;
+    res.json(result);
+  }),
+);
 
 /**
  * PATCH /api/v1/collateral/:id — partial update of mutable collateral fields.
