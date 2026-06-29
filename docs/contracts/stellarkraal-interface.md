@@ -416,3 +416,20 @@ stellar contract invoke \
 - The contract uses `submit_price` to validate oracle updates before they affect TWAP state.
 - Repayments are allowed even when the contract is paused, while new loans and liquidations are blocked.
 - Liquidations are only permitted when `health_factor` is below 10,000 and the repay amount does not exceed `CLOSE_FACTOR`.
+
+## Storage TTL Strategy
+
+Soroban persistent storage entries expire after a configurable number of ledgers. Loan and collateral records are long-lived (active for the duration of a loan, potentially months), so every write to a `Loan` or `Collateral` entry is followed by an `extend_ttl` call.
+
+| Constant | Value | Approximate duration |
+|---|---|---|
+| `PERSISTENT_TTL_THRESHOLD` | 100,000 ledgers | ~5.7 days |
+| `PERSISTENT_TTL_LEDGERS` | 518,400 ledgers | ~30 days |
+
+**Behaviour:** On each write the entry's TTL is extended to `PERSISTENT_TTL_LEDGERS` only when its current TTL has fallen below `PERSISTENT_TTL_THRESHOLD`. This means:
+
+- A freshly created or recently updated entry will not incur a redundant extend ledger write.
+- An entry that hasn't been touched for ~24 days will be extended back to 30 days on the next interaction.
+- Both constants are compile-time values (`pub const`) in `lib.rs` and can be adjusted for different network configurations without changing contract logic.
+
+**Off-chain responsibility:** The TTL extension inside the contract only fires on writes triggered by contract invocations. Callers (backend or keeper bots) should additionally invoke `ExtendFootprintTTLOp` for dormant entries (loans where no repayment has occurred for an extended period) to prevent archival. See [Stellar docs — state archival](https://developers.stellar.org/docs/learn/fundamentals/contract-development/storage/state-archival).

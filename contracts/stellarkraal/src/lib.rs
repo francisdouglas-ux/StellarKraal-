@@ -33,6 +33,23 @@ const PAUSED: Symbol = symbol_short!("PAUSED");   // pause state flag
 const PAUSE_EXP: Symbol = symbol_short!("PAUSEXP"); // pause expiry timestamp
 const ORACLES: Symbol = symbol_short!("ORACLES");
 
+// ── TTL management ───────────────────────────────────────────────────────────
+//
+// Persistent storage entries (loans, collaterals) must have their TTL extended
+// on every write to prevent archival. The strategy is:
+//   - Extend to `PERSISTENT_TTL_LEDGERS` on every write.
+//   - Only extend when the current TTL is below `PERSISTENT_TTL_THRESHOLD`.
+//     This avoids a redundant ledger write on reads when the entry is already
+//     near the maximum.
+//   - The values are compile-time constants so they can be adjusted for
+//     different network configurations (mainnet vs testnet) without changing
+//     contract logic. At ~5 s/ledger, 518_400 ledgers ≈ 30 days.
+
+/// Minimum remaining TTL (in ledgers) below which a persistent entry is extended.
+pub const PERSISTENT_TTL_THRESHOLD: u32 = 100_000; // ~5.7 days
+/// Target TTL (in ledgers) applied when extending a persistent entry.
+pub const PERSISTENT_TTL_LEDGERS: u32 = 518_400;   // ~30 days
+
 // ── Errors ───────────────────────────────────────────────────────────────────
 
 /// Contract-level errors returned by all public functions.
@@ -446,6 +463,7 @@ impl StellarKraal {
             loan_id: 0,
         };
         env.storage().persistent().set(&DataKey::Collateral(id), &record);
+        env.storage().persistent().extend_ttl(&DataKey::Collateral(id), PERSISTENT_TTL_THRESHOLD, PERSISTENT_TTL_LEDGERS);
 
         // Emit livestock_registered event
         env.events().publish(
@@ -539,6 +557,7 @@ impl StellarKraal {
             status: LoanStatus::Active,
         };
         env.storage().persistent().set(&DataKey::Loan(loan_id), &loan);
+        env.storage().persistent().extend_ttl(&DataKey::Loan(loan_id), PERSISTENT_TTL_THRESHOLD, PERSISTENT_TTL_LEDGERS);
 
         // Mark all collaterals as locked to this loan
         for col_id in collateral_ids.iter() {
@@ -549,6 +568,7 @@ impl StellarKraal {
                 .unwrap();
             col.loan_id = loan_id;
             env.storage().persistent().set(&DataKey::Collateral(col_id), &col);
+            env.storage().persistent().extend_ttl(&DataKey::Collateral(col_id), PERSISTENT_TTL_THRESHOLD, PERSISTENT_TTL_LEDGERS);
         }
 
         let token_addr: Address = env.storage().instance().get(&TOKEN).unwrap();
@@ -646,6 +666,7 @@ impl StellarKraal {
             loan.status = LoanStatus::Repaid;
         }
         env.storage().persistent().set(&DataKey::Loan(loan_id), &loan);
+        env.storage().persistent().extend_ttl(&DataKey::Loan(loan_id), PERSISTENT_TTL_THRESHOLD, PERSISTENT_TTL_LEDGERS);
 
         // Emit loan_repaid event
         env.events().publish(
@@ -725,6 +746,7 @@ impl StellarKraal {
             loan.status = LoanStatus::Liquidated;
         }
         env.storage().persistent().set(&DataKey::Loan(loan_id), &loan);
+        env.storage().persistent().extend_ttl(&DataKey::Loan(loan_id), PERSISTENT_TTL_THRESHOLD, PERSISTENT_TTL_LEDGERS);
 
         // Emit loan_liquidated event
         env.events().publish(
