@@ -64,3 +64,27 @@ jobs:
         run: |
           cd contracts/stellarkraal
           cargo test
+
+      - name: Install nightly Rust (fuzz)
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Cache cargo-fuzz binary
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/bin/cargo-fuzz
+          key: cargo-fuzz-bin-${{ runner.os }}
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked || true
+
+      - name: Fuzz interest_rate (60s)
+        working-directory: contracts/stellarkraal
+        run: cargo +nightly fuzz run interest_rate -- -max_total_time=60
+
+      - name: Upload fuzz crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-artifacts-rust-ci
+          path: contracts/stellarkraal/fuzz/artifacts/
+          if-no-files-found: ignore
