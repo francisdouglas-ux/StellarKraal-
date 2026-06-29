@@ -369,6 +369,12 @@ async function buildContractTx(
   return prepared.toXDR();
 }
 
+// ── Timeout constants ──────────────────────────────────────────────────────────
+// Standard CRUD routes inherit the global timeout (TIMEOUT_GLOBAL_MS, default 10 s).
+// Contract submission routes that invoke Soroban RPC use CONTRACT_TIMEOUT_MS (default 30 s)
+// because transaction preparation and simulation can be slow under load.
+const CONTRACT_TIMEOUT_MS = parseInt(config.TIMEOUT_CONTRACT_MS, 10);
+
 // ── routes ────────────────────────────────────────────────────────────────────
 
 
@@ -376,7 +382,7 @@ async function buildContractTx(
 // POST /api/collateral/register
 app.post(
   "/api/collateral/register",
-  timeoutMiddleware(parseInt(config.TIMEOUT_WRITE_MS, 10)),
+  timeoutMiddleware(CONTRACT_TIMEOUT_MS),
   asyncHandler(async (req: Request, res: Response) => {
     const validation = registerCollateralSchema.safeParse(req.body);
 
@@ -416,7 +422,7 @@ app.post(
 // POST /api/loan/request
 app.post(
   "/api/loan/request",
-  timeoutMiddleware(parseInt(config.TIMEOUT_WRITE_MS, 10)),
+  timeoutMiddleware(CONTRACT_TIMEOUT_MS),
   asyncHandler(async (req: Request, res: Response) => {
     const validation = loanRequestSchema.safeParse(req.body);
 
@@ -461,7 +467,7 @@ app.post(
 // POST /api/loan/repay
 app.post(
   "/api/loan/repay",
-  timeoutMiddleware(parseInt(config.TIMEOUT_WRITE_MS, 10)),
+  timeoutMiddleware(CONTRACT_TIMEOUT_MS),
   asyncHandler(async (req: Request, res: Response) => {
     const idempotencyKey = req.headers["idempotency-key"] as string | undefined;
     if (!idempotencyKey) {
@@ -507,7 +513,7 @@ const loanLiquidateSchema = z.object({
 
 app.post(
   "/api/loan/liquidate",
-  timeoutMiddleware(parseInt(config.TIMEOUT_WRITE_MS, 10)),
+  timeoutMiddleware(CONTRACT_TIMEOUT_MS),
   asyncHandler(async (req: Request, res: Response) => {
     const validation = loanLiquidateSchema.safeParse(req.body);
     if (!validation.success) {
@@ -612,10 +618,15 @@ app.post(
   }),
 );
 
+// Tracks collateral IDs with an in-flight loan creation to prevent double-pledging
+// under concurrent requests. JS is single-threaded so this set is safe without a mutex,
+// but the `await buildContractTx` below is a yield point — the set closes that window.
+const pendingPledges = new Set<string>();
+
 // POST /api/loan/create
 app.post(
   "/api/loan/create",
-  timeoutMiddleware(parseInt(config.TIMEOUT_WRITE_MS, 10)),
+  timeoutMiddleware(CONTRACT_TIMEOUT_MS),
   asyncHandler(async (req: Request, res: Response) => {
     const validation = createLoanSchema.safeParse(req.body);
     if (!validation.success) {
@@ -624,32 +635,50 @@ app.post(
 
     const { borrowerAddress, collateralId, requestedAmount } = validation.data;
 
+    // ── Ownership & pledge validation (runs atomically before the async RPC call) ──
+
     const collateral = getCollateral(collateralId);
     if (!collateral) {
       return res.status(404).json({ error: "Collateral not found" });
     }
 
-    if (isCollateralPledged(collateralId)) {
-      return res.status(409).json({ error: "Collateral is already pledged to another loan" });
+    const user = (req as any).user as { publicKey?: string } | undefined;
+    if (collateral.owner !== (user?.publicKey ?? borrowerAddress)) {
+      return res.status(400).json({
+        error: `Collateral ${collateralId} does not belong to authenticated user`,
+      });
     }
 
-    const maxLoanAmount = Math.floor(collateral.appraised_value * 0.8);
-    const loanAmount = Math.min(requestedAmount, maxLoanAmount);
+    if (pendingPledges.has(collateralId) || isCollateralPledged(collateralId)) {
+      return res.status(409).json({
+        error: `Collateral ${collateralId} is already pledged to another active loan`,
+      });
+    }
 
-    const xdrTx = await buildContractTx(borrowerAddress, "request_loan", [
-      new Address(borrowerAddress).toScVal(),
-      nativeToScVal(collateralId, { type: "string" }),
-      nativeToScVal(BigInt(loanAmount), { type: "i128" }),
-    ]);
+    // Reserve the collateral ID for the duration of this request so concurrent
+    // calls cannot pass the pledge check while the contract TX is being built.
+    pendingPledges.add(collateralId);
+    try {
+      const maxLoanAmount = Math.floor(collateral.appraised_value * 0.8);
+      const loanAmount = Math.min(requestedAmount, maxLoanAmount);
 
-    const loan = insertLoan({
-      id: randomUUID(),
-      borrower: borrowerAddress,
-      collateral_id: collateralId,
-      amount: loanAmount,
-    });
+      const xdrTx = await buildContractTx(borrowerAddress, "request_loan", [
+        new Address(borrowerAddress).toScVal(),
+        nativeToScVal(collateralId, { type: "string" }),
+        nativeToScVal(BigInt(loanAmount), { type: "i128" }),
+      ]);
 
-    return res.status(201).json({ loan, xdr: xdrTx });
+      const loan = insertLoan({
+        id: randomUUID(),
+        borrower: borrowerAddress,
+        collateral_id: collateralId,
+        amount: loanAmount,
+      });
+
+      return res.status(201).json({ loan, xdr: xdrTx });
+    } finally {
+      pendingPledges.delete(collateralId);
+    }
   }),
 );
 
@@ -1364,6 +1393,55 @@ app.patch(
 
     invalidateCache("/api/collateral");
     res.json({ restored: true, id });
+  }),
+);
+
+// ── Loan estimate ─────────────────────────────────────────────────────────────
+
+/** 1 XLM expressed in stroops (the smallest Stellar unit). */
+const ONE_XLM_STROOPS = 10_000_000;
+
+const loanEstimateSchema = z.object({
+  principal: z.number().int().positive(),
+});
+
+/**
+ * POST /api/v1/loans/estimate
+ *
+ * Returns a fee breakdown for a proposed loan principal.
+ *
+ * - `originationFee` = `principal * ORIG_FEE_BPS / 10 000`, denominated in stroops.
+ * - `totalAmount`    = `principal + originationFee`.
+ * - `interestRate`   = `ORIG_FEE_BPS / 100` (percentage representation of the BPS value).
+ *
+ * Rejects requests where `principal` is below 1 XLM (10 000 000 stroops).
+ */
+app.post(
+  "/api/v1/loans/estimate",
+  asyncHandler(async (req: Request, res: Response) => {
+    const validation = loanEstimateSchema.safeParse(req.body);
+    if (!validation.success) {
+      return res.status(400).json({
+        error: "Validation failed",
+        details: validation.error.issues,
+      });
+    }
+
+    const { principal } = validation.data;
+
+    if (principal < ONE_XLM_STROOPS) {
+      return res.status(400).json({
+        error: "Validation failed",
+        message: `principal must be at least 1 XLM (${ONE_XLM_STROOPS} stroops)`,
+      });
+    }
+
+    const origFeeBps = parseInt(config.ORIG_FEE_BPS, 10);
+    const originationFee = Math.floor((principal * origFeeBps) / 10_000);
+    const totalAmount = principal + originationFee;
+    const interestRate = origFeeBps / 100;
+
+    return res.json({ principal, originationFee, totalAmount, interestRate });
   }),
 );
 

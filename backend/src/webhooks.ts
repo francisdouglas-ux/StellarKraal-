@@ -3,6 +3,8 @@ import crypto from "crypto";
 export interface WebhookRegistration {
   id: string;
   url: string;
+  /** Per-webhook HMAC-SHA256 secret. Returned once on registration; store securely. */
+  secret: string;
   createdAt: number;
 }
 
@@ -31,8 +33,18 @@ export function __resetForTests(): void {
 /**
  * Register a new webhook listener.
  *
+ * A unique HMAC-SHA256 secret is generated per registration and included in
+ * the response. The caller must persist this secret; it is not retrievable
+ * after registration. Use it to verify the `X-StellarKraal-Signature` header
+ * on every incoming delivery:
+ *
+ * ```
+ * const expected = "sha256=" + createHmac("sha256", secret).update(rawBody).digest("hex");
+ * const trusted  = timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
+ * ```
+ *
  * @param url - Destination URL for webhook delivery.
- * @returns The registered webhook metadata record.
+ * @returns The registered webhook metadata including the one-time secret.
  * @throws Error if the URL is invalid or unsupported.
  */
 export function registerWebhook(url: string): WebhookRegistration {
@@ -46,7 +58,8 @@ export function registerWebhook(url: string): WebhookRegistration {
     throw new Error("Webhook URL must use http or https");
   }
   const id = crypto.randomUUID();
-  const reg: WebhookRegistration = { id, url, createdAt: Date.now() };
+  const secret = crypto.randomBytes(32).toString("hex");
+  const reg: WebhookRegistration = { id, url, secret, createdAt: Date.now() };
   webhooks.set(id, reg);
   return reg;
 }
@@ -54,10 +67,10 @@ export function registerWebhook(url: string): WebhookRegistration {
 /**
  * List all registered webhooks.
  *
- * @returns An array of registered webhook metadata.
+ * @returns An array of registered webhook metadata (secret omitted for security).
  */
-export function getWebhooks(): WebhookRegistration[] {
-  return Array.from(webhooks.values());
+export function getWebhooks(): Omit<WebhookRegistration, "secret">[] {
+  return Array.from(webhooks.values()).map(({ secret: _s, ...rest }) => rest);
 }
 
 /**
@@ -69,13 +82,23 @@ export function getDeliveryLogs(): DeliveryLog[] {
   return deliveryLogs;
 }
 
-function sign(payload: string): string {
-  const secret = process.env.WEBHOOK_SECRET ?? "default-webhook-secret-change-me";
+/**
+ * Compute the HMAC-SHA256 signature for a webhook payload.
+ *
+ * @param payload - Raw JSON string to sign.
+ * @param secret  - Per-webhook secret returned at registration time.
+ * @returns Signature string in the format `sha256=<hex>`.
+ */
+function sign(payload: string, secret: string): string {
   return "sha256=" + crypto.createHmac("sha256", secret).update(payload).digest("hex");
 }
 
 /**
  * Deliver an event payload to all registered webhooks.
+ *
+ * Each delivery includes an `X-StellarKraal-Signature` header containing
+ * `sha256=<hex>` computed with the per-webhook secret. Receivers should verify
+ * this header before processing the payload (see {@link registerWebhook}).
  *
  * @param event - The webhook event name.
  * @param payload - Payload object to send in the webhook body.
@@ -83,9 +106,9 @@ function sign(payload: string): string {
  */
 export async function fireWebhooks(event: string, payload: object): Promise<void> {
   const body = JSON.stringify({ event, payload, timestamp: Date.now() });
-  const signature = sign(body);
 
   for (const wh of webhooks.values()) {
+    const signature = sign(body, wh.secret);
     const log: DeliveryLog = {
       webhookId: wh.id,
       event,
@@ -114,7 +137,7 @@ async function deliver(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-Webhook-Signature": signature,
+        "X-StellarKraal-Signature": signature,
       },
       body,
     });

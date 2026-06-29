@@ -13,6 +13,10 @@ const envSchema = z.object({
   // Request timeouts in milliseconds
   TIMEOUT_GLOBAL_MS: z.string().regex(/^\d+$/, "TIMEOUT_GLOBAL_MS must be a number").default("10000"),
   TIMEOUT_WRITE_MS: z.string().regex(/^\d+$/, "TIMEOUT_WRITE_MS must be a number").default("15000"),
+  /** Timeout for contract submission routes (e.g. loan request, repay, liquidate). @default 30000 */
+  TIMEOUT_CONTRACT_MS: z.string().regex(/^\d+$/, "TIMEOUT_CONTRACT_MS must be a number").default("30000"),
+  /** Origination fee in basis points. @default 50 (0.5%) */
+  ORIG_FEE_BPS: z.string().regex(/^\d+$/, "ORIG_FEE_BPS must be a number").default("50"),
   // Webhook secret
   WEBHOOK_SECRET: z.string().min(16, "WEBHOOK_SECRET must be at least 16 characters").optional(),
   // Admin key for webhook admin endpoints
