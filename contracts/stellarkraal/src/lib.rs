@@ -1311,8 +1311,11 @@ impl StellarKraal {
         }
         
         // utilization = (total_borrowed / total_liquidity) * 10_000
-        let utilization = (total_borrowed * 10_000 / total_liquidity) as u32;
-        Ok(utilization.min(10_000))
+        let utilization = total_borrowed
+            .checked_mul(10_000)
+            .ok_or(Error::InvalidAmount)?
+            / total_liquidity;
+        Ok(utilization.min(10_000) as u32)
     }
 
     fn calculate_interest_rate(env: &Env, utilization_bps: u32) -> Result<u32, Error> {
