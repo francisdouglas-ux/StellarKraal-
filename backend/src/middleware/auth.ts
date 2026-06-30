@@ -5,23 +5,27 @@
  *   1. GET  /api/auth/challenge  — returns a one-time challenge nonce
  *   2. POST /api/auth/login      — client submits { walletAddress, signedChallenge: { nonce, signature } }
  *                                  backend verifies Stellar ed25519 signature, issues JWT + refresh token
- *   3. POST /api/auth/refresh    — exchanges a valid refresh token for a new JWT
+ *   3. POST /api/v1/auth/refresh — exchanges a valid httpOnly refresh token cookie for a new JWT
+ *                                  and a rotated refresh token cookie; old token is invalidated
  *
- * JWT expires in 24 hours by default; refresh tokens expire in 7 days.
+ * Access tokens expire in ACCESS_TTL_MS (default 15 min).
+ * Refresh tokens expire in REFRESH_TTL_MS (default 7 days) and are stored as SHA-256 hashes.
  * All POST/PUT/DELETE routes (except auth endpoints) require a valid JWT.
  */
 import { Request, Response, NextFunction, Router } from 'express';
-import { createHmac, randomBytes } from 'crypto';
+import { createHmac, createHash, randomBytes } from 'crypto';
 import { Keypair } from '@stellar/stellar-sdk';
+import { config } from '../config';
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
 const JWT_SECRET = process.env.JWT_SECRET ?? 'change-me-in-production-min-32-chars!!';
-const ACCESS_TTL_MS = process.env.JWT_EXPIRES_IN_MS
-  ? parseInt(process.env.JWT_EXPIRES_IN_MS, 10)
-  : 24 * 60 * 60 * 1000; // default 24 hours
-const REFRESH_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+/** Access token TTL in ms. Reads ACCESS_TTL_MS from config (default 15 min). */
+const ACCESS_TTL_MS = parseInt(config.ACCESS_TTL_MS, 10);
+/** Refresh token TTL in ms. Reads REFRESH_TTL_MS from config (default 7 days). */
+const REFRESH_TTL_MS = parseInt(config.REFRESH_TTL_MS, 10);
 const CHALLENGE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const REFRESH_COOKIE = 'refreshToken';
 
 // ── Minimal JWT (HS256, no external dep) ─────────────────────────────────────
 
@@ -52,17 +56,43 @@ function verifyJwt(token: string): Record<string, unknown> {
 
 // challenge → expiry
 const challenges = new Map<string, number>();
-// refreshToken → { publicKey, expiry }
+// tokenHash → { publicKey, expiry }
 const refreshTokens = new Map<string, { publicKey: string; exp: number }>();
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function issueTokens(publicKey: string) {
+/** SHA-256 hash of a raw token string (stored in DB, never the raw token). */
+function hashToken(raw: string): string {
+  return createHash('sha256').update(raw).digest('hex');
+}
+
+/**
+ * Issue a new access token and rotate the refresh token.
+ * Stores only the hash of the refresh token.
+ * @param publicKey - Stellar wallet public key for the user.
+ * @returns Access token string and raw refresh token (to be set as cookie).
+ */
+function issueTokens(publicKey: string): { accessToken: string; rawRefresh: string; expiresIn: number } {
   const now = Date.now();
-  const accessToken = signJwt({ sub: publicKey, exp: now + ACCESS_TTL_MS, iat: now });
-  const refreshToken = randomBytes(32).toString('hex');
-  refreshTokens.set(refreshToken, { publicKey, exp: now + REFRESH_TTL_MS });
-  return { accessToken, refreshToken, expiresIn: ACCESS_TTL_MS / 1000 };
+  const accessToken = signJwt({ sub: publicKey, iat: Math.floor(now / 1000), exp: Math.floor((now + ACCESS_TTL_MS) / 1000) });
+  const rawRefresh = randomBytes(32).toString('hex');
+  refreshTokens.set(hashToken(rawRefresh), { publicKey, exp: now + REFRESH_TTL_MS });
+  return { accessToken, rawRefresh, expiresIn: ACCESS_TTL_MS / 1000 };
+}
+
+/**
+ * Set the refresh token as an httpOnly, Secure, SameSite=Strict cookie.
+ * @param res - Express response object.
+ * @param rawToken - Raw (unhashed) refresh token string.
+ */
+function setRefreshCookie(res: Response, rawToken: string): void {
+  res.cookie(REFRESH_COOKIE, rawToken, {
+    httpOnly: true,
+    secure: config.NODE_ENV === 'production',
+    sameSite: 'strict',
+    maxAge: REFRESH_TTL_MS,
+    path: '/api/v1/auth/refresh',
+  });
 }
 
 // ── Router ────────────────────────────────────────────────────────────────────
@@ -108,27 +138,43 @@ authRouter.post('/login', (req: Request, res: Response) => {
     return res.status(401).json({ error: 'Invalid wallet address or signature' });
   }
 
-  const now = Date.now();
-  const exp = now + ACCESS_TTL_MS;
-  const accessToken = signJwt({ sub: walletAddress, iat: Math.floor(now / 1000), exp: Math.floor(exp / 1000) });
-  const refreshToken = randomBytes(32).toString('hex');
-  refreshTokens.set(refreshToken, { publicKey: walletAddress, exp: now + REFRESH_TTL_MS });
-  res.json({ accessToken, refreshToken, expiresIn: ACCESS_TTL_MS / 1000 });
+  const { accessToken, rawRefresh, expiresIn } = issueTokens(walletAddress);
+  setRefreshCookie(res, rawRefresh);
+  res.json({ accessToken, expiresIn });
 });
 
-// POST /api/auth/refresh — rotate refresh token
+/**
+ * POST /api/v1/auth/refresh — rotate refresh token using httpOnly cookie.
+ *
+ * Reads the refresh token from the `refreshToken` httpOnly cookie.
+ * Validates the hash against the stored entry, invalidates the old token,
+ * and issues a new access token + rotated refresh token cookie.
+ *
+ * @returns { accessToken, expiresIn } on success.
+ * @returns 400 if the cookie is missing.
+ * @returns 401 if the token is invalid, revoked, or expired.
+ */
 authRouter.post('/refresh', (req: Request, res: Response) => {
-  const { refreshToken } = req.body as { refreshToken?: string };
-  if (!refreshToken) return res.status(400).json({ error: 'refreshToken is required' });
+  const cookieHeader = req.headers.cookie ?? '';
+  const match = cookieHeader.match(new RegExp(`(?:^|;\\s*)${REFRESH_COOKIE}=([^;]+)`));
+  const rawToken = match?.[1];
 
-  const entry = refreshTokens.get(refreshToken);
-  if (!entry || Date.now() > entry.exp) {
-    return res.status(401).json({ error: 'Invalid or expired refresh token' });
+  if (!rawToken) {
+    return res.status(400).json({ error: 'MISSING_TOKEN', message: 'Refresh token cookie is required' });
   }
 
-  // Rotate: invalidate old token, issue new pair
-  refreshTokens.delete(refreshToken);
-  res.json(issueTokens(entry.publicKey));
+  const tokenHash = hashToken(rawToken);
+  const entry = refreshTokens.get(tokenHash);
+
+  if (!entry || Date.now() > entry.exp) {
+    return res.status(401).json({ error: 'INVALID_TOKEN', message: 'Refresh token is invalid or expired' });
+  }
+
+  // Rotate: invalidate old token hash, issue new pair
+  refreshTokens.delete(tokenHash);
+  const { accessToken, rawRefresh, expiresIn } = issueTokens(entry.publicKey);
+  setRefreshCookie(res, rawRefresh);
+  res.json({ accessToken, expiresIn });
 });
 
 // ── JWT middleware ────────────────────────────────────────────────────────────
@@ -171,4 +217,9 @@ export function jwtMiddleware(req: Request, res: Response, next: NextFunction): 
     const message = err instanceof Error ? err.message : 'unknown';
     res.status(401).json({ error: message === 'expired' ? 'Token expired' : 'Invalid token' });
   }
+}
+
+/** Exported for testing only — clears in-memory refresh token store. */
+export function _resetRefreshTokens(): void {
+  refreshTokens.clear();
 }

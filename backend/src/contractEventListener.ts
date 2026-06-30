@@ -131,22 +131,23 @@ function handleEvent(event: SorobanRpc.Api.RawEventResponse): void {
     if (topics.length < 2) return;
 
     const ns = topics[0].sym?.().toString();
-    const action = topics[1].sym?.().toString();
+    if (!ns) return;
 
-    if (!ns || !action) return;
+    const action = topics[1]?.sym?.().toString();
+    const key = action ? `${ns}/${action}` : ns;
 
-    const key = `${ns}/${action}`;
     logEvent("contract.event.received", event, { key });
 
-    if (key === "livestock/registered") {
-      // data: (id, owner, animal_type, count, appraised_value)
+    if (key === "collateral_registered") {
+      // topics: [symbol("collateral_registered"), owner]
+      // data: (id, animal_type, count, appraised_value)
+      const owner = (() => { try { return Address.fromScVal(topics[1]).toString(); } catch { return ""; } })();
       const vals = xdr.ScVal.fromXDR(event.value, "base64").vec?.() ?? [];
-      if (vals.length < 5) return;
+      if (vals.length < 4) return;
       const id = vals[0].u64?.().toString() ?? "";
-      const owner = (() => { try { return Address.fromScVal(vals[1]).toString(); } catch { return ""; } })();
-      const animal_type = vals[2].sym?.().toString() ?? "";
-      const count = Number(vals[3].u32?.() ?? 0);
-      const appraised_value = Number(vals[4].i128?.().lo ?? 0);
+      const animal_type = vals[1].sym?.().toString() ?? "";
+      const count = Number(vals[2].u32?.() ?? 0);
+      const appraised_value = Number(vals[3].i128?.().lo ?? 0);
       insertCollateral({ id, owner, animal_type, count, appraised_value });
       logEvent("contract.event.collateral_synced", event, {
         id,
@@ -166,14 +167,16 @@ function handleEvent(event: SorobanRpc.Api.RawEventResponse): void {
         borrower,
         amount,
       });
-    } else if (key === "loan/repaid") {
-      // data: (loan_id, borrower, repay_amount, outstanding, status)
+    } else if (key === "loan_repaid") {
+      // data: (loan_id, principal_paid, interest_paid, remaining_balance)
       const vals = xdr.ScVal.fromXDR(event.value, "base64").vec?.() ?? [];
-      if (vals.length < 3) return;
+      if (vals.length < 4) return;
       const id = vals[0].u64?.().toString() ?? "";
-      const repayAmount = Number(vals[2].i128?.().lo ?? 0);
+      const principalPaid = Number(vals[1].i128?.().lo ?? 0);
+      const interestPaid = Number(vals[2].i128?.().lo ?? 0);
+      const repayAmount = principalPaid + interestPaid;
       updateTransaction(id, { status: "completed", amount: repayAmount });
-      logEvent("contract.event.loan_repaid_synced", event, { id, repayAmount });
+      logEvent("contract.event.loan_repaid_synced", event, { id, repayAmount, principalPaid, interestPaid });
     } else if (key === "loan/liquidated") {
       // data: (loan_id, liquidator, repay_amount, outstanding, status)
       const vals = xdr.ScVal.fromXDR(event.value, "base64").vec?.() ?? [];

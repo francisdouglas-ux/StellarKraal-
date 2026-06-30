@@ -11,17 +11,18 @@ All events follow the Soroban `env.events().publish(topics, data)` convention:
 
 ## Events
 
-### `livestock / registered`
+### `collateral_registered`
 
 Emitted by `register_livestock` when a new collateral record is created.
 
-| Field | Type | Description |
-|---|---|---|
-| `id` | `u64` | Assigned collateral ID |
-| `owner` | `Address` | Owner's Stellar address |
-| `animal_type` | `Symbol` | Species symbol (e.g. `cattle`) |
-| `count` | `u32` | Number of animals |
-| `appraised_value` | `i128` | Oracle-appraised total value |
+| Field | Topic/Data | Type | Description |
+|---|---|---|---|
+| `collateral_registered` | topic[0] | `Symbol` | Event discriminator |
+| `owner` | topic[1] | `Address` | Owner's Stellar address |
+| `collateral_id` | data[0] | `u64` | Assigned collateral ID |
+| `animal_type` | data[1] | `Symbol` | Species symbol (e.g. `cattle`) |
+| `count` | data[2] | `u32` | Number of animals |
+| `appraised_value` | data[3] | `i128` | Oracle-appraised total value |
 
 ### `loan / requested`
 
@@ -35,17 +36,16 @@ Emitted by `request_loan` when a new loan is originated.
 | `disbursement` | `i128` | Net amount disbursed to borrower |
 | `total_collateral_value` | `i128` | Sum of all collateral appraised values |
 
-### `loan / repaid`
+### `loan_repaid`
 
 Emitted by `repay_loan` after each repayment (partial or full).
 
 | Field | Type | Description |
 |---|---|---|
 | `loan_id` | `u64` | Loan ID |
-| `borrower` | `Address` | Borrower's Stellar address |
-| `repay_amount` | `i128` | Amount repaid in this transaction |
-| `outstanding` | `i128` | Remaining outstanding balance after repayment |
-| `status` | `LoanStatus` | New loan status (`Active` or `Repaid`) |
+| `principal_paid` | `i128` | Amount of principal repaid in this transaction |
+| `interest_paid` | `i128` | Amount of interest repaid in this transaction |
+| `remaining_balance` | `i128` | Remaining outstanding balance after repayment |
 
 ### `loan / liquidated`
 
@@ -73,9 +73,9 @@ Emitted when origination or interest fees are transferred to the treasury.
 Topics follow the pattern `(namespace, action)` using `symbol_short!` macros:
 
 ```
-(symbol_short!("livestock"), symbol_short!("registered"))
+(Symbol::new(&env, "collateral_registered"), owner)   // collateral registration
 (symbol_short!("loan"),      symbol_short!("requested"))
-(symbol_short!("loan"),      symbol_short!("repaid"))
+(Symbol::new(&env, "loan_repaid"), borrower_address)
 (symbol_short!("loan"),      symbol_short!("liquidated"))
 ```
 

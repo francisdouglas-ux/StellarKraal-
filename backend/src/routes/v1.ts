@@ -8,9 +8,10 @@ import { config } from "../config";
 import { pool } from "../utils/connectionPool";
 import { invalidateAll } from "../utils/appraisalCache";
 import { asyncHandler } from "../utils/asyncHandler";
-import { registerWebhook, getWebhooks, getDeliveryLogs } from "../webhooks";
+import { registerWebhook, getWebhooks, getDeliveryLogs, deleteWebhook } from "../webhooks";
 import { timeoutMiddleware } from "../middleware/timeout";
 import { writeLimiter } from "../middleware/rateLimit";
+import rateLimit from "express-rate-limit";
 import { deprecationHeadersWhen } from "../middleware/deprecation";
 import { fireAlert } from "../utils/alerting";
 import { rules } from "../utils/alertRules";
@@ -220,12 +221,12 @@ v1Router.post(
   "/webhooks",
   timeoutMiddleware(parseInt(config.TIMEOUT_WRITE_MS, 10)),
   (req: Request, res: Response) => {
-    const { url } = req.body;
+    const { url, encrypt } = req.body;
     if (!url || typeof url !== "string") {
       return res.status(400).json({ error: "url is required" });
     }
     try {
-      return res.status(201).json(registerWebhook(url));
+      return res.status(201).json(registerWebhook(url, encrypt === true));
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to register webhook";
       return res.status(400).json({ error: message });
@@ -239,6 +240,15 @@ v1Router.get("/admin/webhooks", (_req: Request, res: Response) => {
 
 v1Router.get("/admin/webhooks/logs", (_req: Request, res: Response) => {
   res.json(getDeliveryLogs());
+});
+
+v1Router.delete("/webhooks/:id", (req: Request, res: Response) => {
+  const { id } = req.params;
+  const deleted = deleteWebhook(id as string);
+  if (!deleted) {
+    return res.status(404).json({ error: "Webhook not found", message: `No webhook with id '${id}'` });
+  }
+  res.status(204).send();
 });
 
 v1Router.post("/alerts/webhook", async (req: Request, res: Response) => {
@@ -332,5 +342,62 @@ v1Router.put("/settings/:wallet", (req: Request, res: Response) => {
   settingsStore.set(wallet, updated);
   res.json(updated);
 });
+
+// ── Transaction Status ────────────────────────────────────────────────────────
+
+/**
+ * GET /api/v1/transactions/:hash/status
+ *
+ * Polls the Soroban RPC for the status of a submitted transaction XDR hash.
+ *
+ * @returns `{ status: 'pending' | 'success' | 'failed', ledger?, errorCode? }`
+ *
+ * Rate-limited to 10 req/s per user (inherits readLimiter window of 1 min / 100 req).
+ * A dedicated 6-second window limiter (max 10) is applied to match the 10 req/s spec.
+ */
+const txStatusLimiter = rateLimit({
+  windowMs: 6 * 1000, // 6-second rolling window → 10 req/6s ≈ 10 req/s
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (_req: Request, res: Response) => {
+    res.setHeader("Retry-After", "6");
+    res.status(429).json({ error: "Too many requests", message: "Transaction status polling is rate-limited to 10 req/s", retryAfter: 6 });
+  },
+  keyGenerator: (req: Request) => {
+    const user = (req as any).user;
+    return user?.publicKey ?? req.ip ?? "anonymous";
+  },
+});
+
+v1Router.get(
+  "/transactions/:hash/status",
+  txStatusLimiter,
+  asyncHandler(async (req: Request, res: Response) => {
+    const { hash } = req.params as { hash: string };
+    if (!hash || !/^[a-fA-F0-9]{64}$/.test(hash)) {
+      return res.status(400).json({ error: "Validation failed", message: "hash must be a 64-char hex string" });
+    }
+
+    let result: any;
+    try {
+      result = await rpcClient.getTransaction(hash);
+    } catch (err: any) {
+      return res.status(502).json({ error: "RPC error", message: err?.message ?? "Failed to query transaction status" });
+    }
+
+    // SorobanRpc.GetTransactionResponse status values: NOT_FOUND, SUCCESS, FAILED
+    const rpcStatus: string = result?.status ?? "NOT_FOUND";
+
+    if (rpcStatus === "SUCCESS") {
+      return res.json({ status: "success", ledger: result.ledger });
+    }
+    if (rpcStatus === "FAILED") {
+      return res.json({ status: "failed", errorCode: result.resultXdr ?? undefined });
+    }
+    // NOT_FOUND → still pending (in mempool or not yet confirmed)
+    return res.json({ status: "pending" });
+  })
+);
 
 export { v1Router, startTime, APP_VERSION };

@@ -109,7 +109,7 @@ The contract manages livestock-backed loans with the following responsibilities:
   - `loan_id` — loan identifier.
   - `amount` — repayment amount.
 - Returns: `Result<(), Error>`.
-- State changes: transfers repayment into contract, deducts interest fee to treasury, reduces outstanding balance, updates status to `Repaid` when completed, emits loan repaid event.
+- State changes: transfers repayment into contract, deducts interest fee to treasury, reduces outstanding balance, updates status to `Repaid` when completed, emits `loan_repaid` event.
 
 ### `liquidate(env, liquidator, loan_id, repay_amount)`
 - Description: Liquidate a loan whose health factor is below 1.
@@ -160,6 +160,13 @@ The contract manages livestock-backed loans with the following responsibilities:
 - Parameters:
   - `loan_id` — loan identifier.
 - Returns: `Result<Vec<CollateralRecord>, Error>`.
+- State changes: none.
+
+### `get_collateral_count(env, owner)`
+- Description: Get the number of non-liquidated collaterals registered by an owner.
+- Parameters:
+  - `owner` — owner address.
+- Returns: `u32` — count of non-liquidated collaterals. Returns 0 if none.
 - State changes: none.
 
 ### `update_fee_config(env, admin, origination_fee_bps, interest_fee_bps)`

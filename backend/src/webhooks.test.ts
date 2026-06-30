@@ -3,6 +3,7 @@ import {
   registerWebhook,
   getWebhooks,
   getDeliveryLogs,
+  deleteWebhook,
   fireWebhooks,
   __resetForTests,
 } from "./webhooks";
@@ -47,6 +48,27 @@ describe("registerWebhook", () => {
     expect(() => registerWebhook("ftp://example.com/hook")).toThrow(
       "Webhook URL must use http or https"
     );
+  });
+});
+
+// ── deleteWebhook ─────────────────────────────────────────────────────────────
+
+describe("deleteWebhook", () => {
+  it("returns true and removes the webhook when it exists", () => {
+    const reg = registerWebhook(WEBHOOK_URL);
+    expect(deleteWebhook(reg.id)).toBe(true);
+    expect(getWebhooks().some((w) => w.id === reg.id)).toBe(false);
+  });
+
+  it("returns false when the webhook does not exist", () => {
+    expect(deleteWebhook("non-existent-id")).toBe(false);
+  });
+
+  it("does not affect other registered webhooks", () => {
+    const reg1 = registerWebhook("https://a.example.com/hook");
+    const reg2 = registerWebhook("https://b.example.com/hook");
+    deleteWebhook(reg1.id);
+    expect(getWebhooks().some((w) => w.id === reg2.id)).toBe(true);
   });
 });
 

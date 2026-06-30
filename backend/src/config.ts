@@ -28,6 +28,14 @@ const envSchema = z.object({
   APPRAISAL_CACHE_TTL_MS: z.string().regex(/^\d+$/, "APPRAISAL_CACHE_TTL_MS must be a number").default("300000"),
   // JWT secret (min 32 chars recommended)
   JWT_SECRET: z.string().min(16, "JWT_SECRET must be at least 16 characters").optional(),
+  /** Access token TTL in milliseconds. @default 900000 (15 min) */
+  ACCESS_TTL_MS: z.string().regex(/^\d+$/, "ACCESS_TTL_MS must be a number").default("900000"),
+  /** Refresh token TTL in milliseconds. @default 604800000 (7 days) */
+  REFRESH_TTL_MS: z.string().regex(/^\d+$/, "REFRESH_TTL_MS must be a number").default("604800000"),
+  /** Health factor warning threshold (×10_000). Below this fires a warning alert. @default 13000 (1.3) */
+  HEALTH_FACTOR_WARN: z.string().regex(/^\d+$/, "HEALTH_FACTOR_WARN must be a number").default("13000"),
+  /** Health factor critical threshold (×10_000). Below this fires a critical alert. @default 10000 (1.0) */
+  HEALTH_FACTOR_CRIT: z.string().regex(/^\d+$/, "HEALTH_FACTOR_CRIT must be a number").default("10000"),
   // Node environment
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
   // Frontend URL for CORS
