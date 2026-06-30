@@ -610,8 +610,9 @@ fn setup() -> (Env, Address, Address, Address, Address, Address) {
         init(&env, &cid, &admin, &oracle, &token, &treasury);
         let client = StellarKraalClient::new(&env, &cid);
         let owner = Address::generate(&env);
-        let id = client.register_livestock(&owner, &symbol_short!("cattle"), &5u32, &1_000_000i128);
-        
+        let _id = client.register_livestock(&owner, &symbol_short!("cattle"), &5u32, &1_000_000i128);
+
+        // Verify at least one event was emitted for register_livestock
         let events = env.events().all();
         let last_event = events.last().unwrap();
         let topic = vec![&env, symbol_short!("livestock").into_val(&env), Symbol::new(&env, "registered").into_val(&env)];

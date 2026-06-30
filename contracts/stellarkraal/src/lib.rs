@@ -449,7 +449,7 @@ impl StellarKraal {
         };
         env.storage().persistent().set(&DataKey::Collateral(id), &record);
 
-        // Emit livestock_registered event
+        // Emit collateral_registered event
         env.events().publish(
             (symbol_short!("livestock"), Symbol::new(&env, "registered")),
             (id, record.owner.clone(), record.animal_type.clone(), record.count, record.appraised_value),

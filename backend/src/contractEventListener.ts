@@ -138,15 +138,16 @@ function handleEvent(event: SorobanRpc.Api.RawEventResponse): void {
 
     logEvent("contract.event.received", event, { key });
 
-    if (key === "livestock/registered") {
-      // data: (id, owner, animal_type, count, appraised_value)
+    if (key === "collateral_registered") {
+      // topics: [symbol("collateral_registered"), owner]
+      // data: (id, animal_type, count, appraised_value)
+      const owner = (() => { try { return Address.fromScVal(topics[1]).toString(); } catch { return ""; } })();
       const vals = xdr.ScVal.fromXDR(event.value, "base64").vec?.() ?? [];
-      if (vals.length < 5) return;
+      if (vals.length < 4) return;
       const id = vals[0].u64?.().toString() ?? "";
-      const owner = (() => { try { return Address.fromScVal(vals[1]).toString(); } catch { return ""; } })();
-      const animal_type = vals[2].sym?.().toString() ?? "";
-      const count = Number(vals[3].u32?.() ?? 0);
-      const appraised_value = Number(vals[4].i128?.().lo ?? 0);
+      const animal_type = vals[1].sym?.().toString() ?? "";
+      const count = Number(vals[2].u32?.() ?? 0);
+      const appraised_value = Number(vals[3].i128?.().lo ?? 0);
       insertCollateral({ id, owner, animal_type, count, appraised_value });
       logEvent("contract.event.collateral_synced", event, {
         id,
