@@ -1,7 +1,9 @@
 /**
  * Integration tests for CORS middleware — ALLOWED_ORIGINS env var behaviour.
  */
-import { parseAllowedOrigins } from "./cors";
+import request from "supertest";
+import express from "express";
+import { parseAllowedOrigins, corsMiddleware } from "./cors";
 
 const PROD_ENV = "production";
 const DEV_ENV = "development";
@@ -92,5 +94,20 @@ describe("parseAllowedOrigins", () => {
       "https://app.example.com",
       "https://staging.example.com",
     ]);
+  });
+});
+
+describe("corsMiddleware preflight caching", () => {
+  it("sets Access-Control-Max-Age to 600 on OPTIONS preflight", async () => {
+    const app = express();
+    app.use(corsMiddleware);
+    app.get("/api/test", (_req, res) => res.json({ ok: true }));
+
+    const res = await request(app)
+      .options("/api/test")
+      .set("Origin", "https://example.com")
+      .set("Access-Control-Request-Method", "GET");
+
+    expect(res.headers["access-control-max-age"]).toBe("600");
   });
 });

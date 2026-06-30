@@ -7,6 +7,7 @@ import request from "supertest";
 import express, { Express } from "express";
 import { v1Router } from "./v1";
 import { insertCollateral, insertLoan } from "../db/store";
+import { __resetForTests } from "../webhooks";
 
 const VALID_ADDRESS = "GASPH4OCYOERATXIKLPNURXUP7ISAQU2KWFB5XLUJ3LQHKHOCN3CEGD6";
 const INVALID_ADDRESS = "INVALID_KEY";
@@ -598,6 +599,34 @@ describe("API v1 Integration Tests", () => {
       const loanRecordRes = await request(app).get("/api/v1/loan/1");
       expect(loanRecordRes.status).toBe(200);
       expect(loanRecordRes.body.result).toBeDefined();
+    });
+  });
+
+  // ── DELETE /api/v1/webhooks/:id ───────────────────────────────────────────
+
+  describe("DELETE /api/v1/webhooks/:id", () => {
+    beforeEach(() => {
+      __resetForTests();
+    });
+
+    it("returns 204 and removes an existing webhook", async () => {
+      const createRes = await request(app)
+        .post("/api/v1/webhooks")
+        .send({ url: "https://example.com/hook" });
+      expect(createRes.status).toBe(201);
+      const { id } = createRes.body;
+
+      const deleteRes = await request(app).delete(`/api/v1/webhooks/${id}`);
+      expect(deleteRes.status).toBe(204);
+
+      const listRes = await request(app).get("/api/v1/admin/webhooks");
+      expect(listRes.body.some((w: { id: string }) => w.id === id)).toBe(false);
+    });
+
+    it("returns 404 when the webhook does not exist", async () => {
+      const res = await request(app).delete("/api/v1/webhooks/non-existent-id");
+      expect(res.status).toBe(404);
+      expect(res.body.error).toBe("Webhook not found");
     });
   });
 

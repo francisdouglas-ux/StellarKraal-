@@ -49,3 +49,16 @@ jobs:
         run: |
           cd backend
           npm test
+
+      - name: Generate alert rules
+        run: |
+          cd backend
+          npm run generate:alert-rules
+
+      - name: Validate Prometheus rules (promtool)
+        run: |
+          if command -v promtool &>/dev/null; then
+            promtool check rules observability/prometheus-rules.yml
+          else
+            echo "promtool not available — skipping (install prometheus package to enable)"
+          fi

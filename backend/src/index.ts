@@ -78,6 +78,7 @@ import {
   type UpdateCollateralInput,
 } from "./validators/collateral";
 import rpcClient from "./utils/rpcClient";
+import { mapSorobanError } from "./utils/sorobanErrors";
 import { registerWebhook, getWebhooks, getDeliveryLogs, fireWebhooks } from "./webhooks";
 import { scheduleHealthFactorJob } from "./jobs/healthFactorJob";
 import { httpActiveConnections, httpRequestDurationSeconds, httpRequestsTotal } from "./metrics";
@@ -365,8 +366,12 @@ async function buildContractTx(
     .setTimeout(30)
     .build();
 
-  const prepared = await rpcClient.prepareTransaction(tx);
-  return prepared.toXDR();
+  try {
+    const prepared = await rpcClient.prepareTransaction(tx);
+    return prepared.toXDR();
+  } catch (err) {
+    throw mapSorobanError(err);
+  }
 }
 
 // ── Timeout constants ──────────────────────────────────────────────────────────
