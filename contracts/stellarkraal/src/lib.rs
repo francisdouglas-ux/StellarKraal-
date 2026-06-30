@@ -32,6 +32,24 @@ const CLOSE_FACTOR: Symbol = symbol_short!("CLSFACT"); // close factor bps e.g. 
 const PAUSED: Symbol = symbol_short!("PAUSED");   // pause state flag
 const PAUSE_EXP: Symbol = symbol_short!("PAUSEXP"); // pause expiry timestamp
 const ORACLES: Symbol = symbol_short!("ORACLES");
+const PAUSE_DUR: Symbol = symbol_short!("PAUSEDUR");
+const PENDING_ADMIN: Symbol = symbol_short!("PENDADM");
+const BASE_RATE: Symbol = symbol_short!("BASERATE");
+const SLOPE1: Symbol = symbol_short!("SLOPE1");
+const SLOPE2: Symbol = symbol_short!("SLOPE2");
+const KINK: Symbol = symbol_short!("KINK");
+const TOTAL_BORROWED: Symbol = symbol_short!("TOTBOR");
+const TOTAL_LIQUIDITY: Symbol = symbol_short!("TOTLIQ");
+const TWAP_WINDOW: Symbol = symbol_short!("TWAPWIN");
+const LAST_PRICE: Symbol = symbol_short!("LASTPRC");
+const LAST_PRICE_TIME: Symbol = symbol_short!("LASTTIME");
+const TWAP_PRICE: Symbol = symbol_short!("TWAPPRC");
+const TWAP_SUM: Symbol = symbol_short!("TWAPSUM");
+const TWAP_COUNT: Symbol = symbol_short!("TWAPCNT");
+const PRICE_MIN: Symbol = symbol_short!("PRICEMIN");
+const PRICE_MAX: Symbol = symbol_short!("PRICEMAX");
+const STALE_THR: Symbol = symbol_short!("STALETHR");
+const DEV_BPS: Symbol = symbol_short!("DEVBPS");
 
 // ── Errors ───────────────────────────────────────────────────────────────────
 
@@ -71,6 +89,9 @@ pub enum Error {
     InsufficientOracleQuorum = 17,
     InvalidPrice = 18,
     NotPaused = 19,
+    AlreadyInProgress = 20,
+    AlreadyPaused = 21,
+    ArithmeticOverflow = 22,
 }
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -419,7 +440,7 @@ impl StellarKraal {
         }
         owner.require_auth();
 
-        let id = Self::next_id(&env, DataKey::CollateralCounter);
+        let id = Self::next_id(&env, DataKey::CollateralCounter)?;
         let record = CollateralRecord {
             owner,
             animal_type,
@@ -510,7 +531,7 @@ impl StellarKraal {
         let fee = amount.checked_mul(orig_fee_bps as i128).ok_or(Error::InvalidAmount)? / 10_000;
         let disbursement = amount.checked_sub(fee).ok_or(Error::InvalidAmount)?;
 
-        let loan_id = Self::next_id(&env, DataKey::LoanCounter);
+        let loan_id = Self::next_id(&env, DataKey::LoanCounter)?;
         let loan = LoanRecord {
             id: loan_id,
             borrower: borrower.clone(),
@@ -882,54 +903,6 @@ impl StellarKraal {
         })
     }
 
-    // ── set_pause_duration ────────────────────────────────────────────────
-    pub fn set_pause_duration(env: Env, admin: Address, duration: u64) -> Result<(), Error> {
-        Self::assert_initialized(&env)?;
-        admin.require_auth();
-        let stored_admin: Address = env.storage().instance().get(&ADMIN).ok_or(Error::NotInitialized)?;
-        if admin != stored_admin {
-            return Err(Error::Unauthorized);
-        }
-        env.storage().instance().set(&symbol_short!("PAUSEDUR"), &duration);
-        Ok(())
-    }
-
-    // ── pause ─────────────────────────────────────────────────────────────
-    pub fn pause(env: Env, admin: Address) -> Result<(), Error> {
-        Self::assert_initialized(&env)?;
-        admin.require_auth();
-        let stored_admin: Address = env.storage().instance().get(&ADMIN).ok_or(Error::NotInitialized)?;
-        if admin != stored_admin {
-            return Err(Error::Unauthorized);
-        }
-        env.storage().instance().set(&PAUSED, &true);
-        let duration: u64 = env.storage().instance().get(&symbol_short!("PAUSEDUR")).unwrap_or(0);
-        if duration > 0 {
-            let expires_at = env.ledger().timestamp().checked_add(duration).ok_or(Error::InvalidAmount)?;
-            env.storage().instance().set(&PAUSE_EXP, &expires_at);
-        } else {
-            env.storage().instance().set(&PAUSE_EXP, &0u64);
-        }
-        Ok(())
-    }
-
-    // ── unpause ───────────────────────────────────────────────────────────
-    pub fn unpause(env: Env, admin: Address) -> Result<(), Error> {
-        Self::assert_initialized(&env)?;
-        admin.require_auth();
-        let stored_admin: Address = env.storage().instance().get(&ADMIN).ok_or(Error::NotInitialized)?;
-        if admin != stored_admin {
-            return Err(Error::Unauthorized);
-        }
-        let paused: bool = env.storage().instance().get(&PAUSED).unwrap_or(false);
-        if !paused {
-            return Err(Error::NotPaused);
-        }
-        env.storage().instance().set(&PAUSED, &false);
-        env.storage().instance().set(&PAUSE_EXP, &0u64);
-        Ok(())
-    }
-
     // ── add_oracle ────────────────────────────────────────────────────────
     pub fn add_oracle(env: Env, admin: Address, oracle: Address) -> Result<(), Error> {
         Self::assert_initialized(&env)?;
@@ -1130,8 +1103,11 @@ impl StellarKraal {
         }
         
         // utilization = (total_borrowed / total_liquidity) * 10_000
-        let utilization = (total_borrowed * 10_000 / total_liquidity) as u32;
-        Ok(utilization.min(10_000))
+        let utilization = total_borrowed
+            .checked_mul(10_000)
+            .ok_or(Error::InvalidAmount)?
+            / total_liquidity;
+        Ok(utilization.min(10_000) as u32)
     }
 
     fn calculate_interest_rate(env: &Env, utilization_bps: u32) -> Result<u32, Error> {
