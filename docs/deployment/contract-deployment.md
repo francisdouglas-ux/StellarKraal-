@@ -95,29 +95,46 @@ Or call any read function available.
 - [ ] Backup of keys created  
 
 ## Deploy to Mainnet
+
+Use the guarded deployment script for mainnet. It refuses to run unless
+`NETWORK=mainnet` is set and all pre-deployment checks pass.
+
+Pre-deployment checks:
+- Verify the optimized WASM hash against `EXPECTED_WASM_HASH`.
+- Confirm `ADMIN_ADDRESS` by requiring `CONFIRM_ADMIN_ADDRESS` to match exactly.
+- Verify required Stellar addresses are present and that `TOKEN_ADDRESS` is a Soroban contract address.
+
 ```bash
-soroban contract deploy \
-  --wasm target/wasm32-unknown-unknown/release/*.wasm \
-  --source deployer \
-  --network mainnet
+export NETWORK=mainnet
+export RPC_URL=https://mainnet.sorobanrpc.com
+export WASM_PATH=contracts/stellarkraal/target/wasm32-unknown-unknown/release/stellarkraal.wasm
+export EXPECTED_WASM_HASH=<sha256-of-reviewed-wasm>
+export DEPLOYER=deployer
+export ADMIN_ADDRESS=<MAINNET_ADMIN_ADDRESS>
+export CONFIRM_ADMIN_ADDRESS=<MAINNET_ADMIN_ADDRESS>
+export TOKEN_ADDRESS=<MAINNET_TOKEN_CONTRACT_ADDRESS>
+export ORACLE_ADDRESS=<MAINNET_ORACLE_ADDRESS>
+export TREASURY_ADDRESS=<MAINNET_TREASURY_ADDRESS>
+export LTV_BPS=6000
+export LIQ_THRESHOLD_BPS=8000
+
+./scripts/deploy-mainnet.sh
 ```
 
-## Initialize (Mainnet)
+The script deploys the WASM, initializes the contract, runs
+`scripts/verify-deployment.ts` with `NEXT_PUBLIC_NETWORK=mainnet`, and prints:
+
 ```bash
-soroban contract invoke \
-  --id <CONTRACT_ID> \
-  --source deployer \
-  --network mainnet \
-  -- \
-  init \
-  --admin <ADMIN_ADDRESS>
+CONTRACT_ID=<deployed-contract-id>
+DEPLOY_TX_HASH=<deployment-transaction-hash>
 ```
 
 ## Post-Deployment Verification
-- Confirm contract responds to queries
-- Verify initialization parameters
-- Run small test transactions
-- Monitor logs and events
+- Confirm the script completed `verify-deployment.ts` successfully on mainnet.
+- Store `CONTRACT_ID` and `DEPLOY_TX_HASH` in the release notes and operations vault.
+- Verify initialization parameters against the deployment ticket.
+- Run small test transactions only after admin approval.
+- Monitor logs and events.
 
 ## Rollback Procedure
 If something goes wrong:
