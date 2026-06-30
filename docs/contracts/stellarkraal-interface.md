@@ -445,6 +445,20 @@ stellar contract invoke \
   --rpc-url "$RPC_URL"
 ```
 
+### Transfer collateral ownership
+
+```bash
+stellar contract invoke \
+  --id "$CONTRACT_ID" \
+  --fn transfer_collateral \
+  --arg address:$CURRENT_OWNER \
+  --arg u64:$COLLATERAL_ID \
+  --arg address:$NEW_OWNER \
+  --network "$NETWORK" \
+  --rpc-url "$RPC_URL" \
+  --source "$CURRENT_OWNER"
+```
+
 ## Notes
 
 - The contract uses `submit_price` to validate oracle updates before they affect TWAP state.
