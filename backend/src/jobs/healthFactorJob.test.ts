@@ -1,5 +1,6 @@
-import { computeHealthFactor, runHealthFactorJob } from "./healthFactorJob";
+import { computeHealthFactor, runHealthFactorJob, _resetAlertCooldowns } from "./healthFactorJob";
 import * as store from "../db/store";
+import * as alerting from "../utils/alerting";
 
 // ── computeHealthFactor ───────────────────────────────────────────────────────
 
@@ -13,35 +14,123 @@ describe("computeHealthFactor", () => {
   });
 
   it("returns >= 10_000 for a safe loan (HF = 13_333)", () => {
-    // collateral=1000, outstanding=600, liq_thr=8000
-    // HF = (1000 * 8000) / (600 * 10000) * 10000 = 13333.33
     const hf = computeHealthFactor(1_000, 600);
     expect(hf).not.toBeNull();
     expect(hf!).toBeGreaterThanOrEqual(10_000);
   });
 
   it("returns < 10_000 for an at-risk loan (HF = 9_333)", () => {
-    // collateral=700, outstanding=600
-    // HF = (700 * 8000) / (600 * 10000) * 10000 = 9333.33
     const hf = computeHealthFactor(700, 600);
     expect(hf).not.toBeNull();
     expect(hf!).toBeLessThan(10_000);
   });
 
   it("returns exactly 10_000 at the liquidation boundary", () => {
-    // collateral=750, outstanding=600
-    // HF = (750 * 8000) / (600 * 10000) * 10000 = 10000
     const hf = computeHealthFactor(750, 600);
     expect(hf).toBe(10_000);
   });
 });
 
-// ── runHealthFactorJob ────────────────────────────────────────────────────────
+// ── Threshold alert tests ─────────────────────────────────────────────────────
+
+describe("runHealthFactorJob — threshold alerts", () => {
+  let fireSpy: jest.SpyInstance;
+
+  beforeEach(() => {
+    jest.restoreAllMocks();
+    _resetAlertCooldowns();
+    fireSpy = jest.spyOn(alerting, "fireAlert").mockResolvedValue(undefined);
+  });
+
+  function makeLoan(id: string, amount: number): store.LoanRecord {
+    return {
+      id,
+      borrower: "G1",
+      collateral_id: `col-${id}`,
+      amount,
+      status: "active",
+      health_factor: null,
+      createdAt: new Date().toISOString(),
+      deletedAt: null,
+    };
+  }
+
+  function makeCollateral(id: string, appraisedValue: number): store.CollateralRecord {
+    return {
+      id: `col-${id}`,
+      owner: "G1",
+      animal_type: "cattle",
+      count: 5,
+      appraised_value: appraisedValue,
+      createdAt: new Date().toISOString(),
+      deletedAt: null,
+    };
+  }
+
+  it("fires warning when HF is between CRIT (10000) and WARN (13000)", async () => {
+    // HF = (900 * 8000) / (600 * 10000) * 10000 = 12000 → between 10000 and 13000
+    const loan = makeLoan("loan-w", 600);
+    const col = makeCollateral("loan-w", 900);
+    jest.spyOn(store, "listActiveLoans").mockReturnValue([loan]);
+    jest.spyOn(store, "getCollateral").mockReturnValue(col);
+    jest.spyOn(store, "updateLoan").mockReturnValue({ ...loan, health_factor: 12000, status: "active" });
+
+    await runHealthFactorJob();
+
+    expect(fireSpy).toHaveBeenCalledTimes(1);
+    expect(fireSpy.mock.calls[0][0].severity).toBe("warning");
+  });
+
+  it("fires critical when HF is below CRIT (10000)", async () => {
+    // HF = (700 * 8000) / (600 * 10000) * 10000 = 9333 → below 10000
+    const loan = makeLoan("loan-c", 600);
+    const col = makeCollateral("loan-c", 700);
+    jest.spyOn(store, "listActiveLoans").mockReturnValue([loan]);
+    jest.spyOn(store, "getCollateral").mockReturnValue(col);
+    jest.spyOn(store, "updateLoan").mockReturnValue({ ...loan, health_factor: 9333, status: "at_risk" });
+
+    await runHealthFactorJob();
+
+    expect(fireSpy).toHaveBeenCalledTimes(1);
+    expect(fireSpy.mock.calls[0][0].severity).toBe("critical");
+  });
+
+  it("does not fire alert when HF is above WARN (13000)", async () => {
+    // HF = (1000 * 8000) / (600 * 10000) * 10000 = 13333 → above 13000
+    const loan = makeLoan("loan-safe", 600);
+    const col = makeCollateral("loan-safe", 1000);
+    jest.spyOn(store, "listActiveLoans").mockReturnValue([loan]);
+    jest.spyOn(store, "getCollateral").mockReturnValue(col);
+    jest.spyOn(store, "updateLoan").mockReturnValue({ ...loan, health_factor: 13333, status: "active" });
+
+    await runHealthFactorJob();
+
+    expect(fireSpy).not.toHaveBeenCalled();
+  });
+
+  it("cooldown suppresses a second alert within 1 hour for the same loan", async () => {
+    const loan = makeLoan("loan-cd", 600);
+    const col = makeCollateral("loan-cd", 700);
+    jest.spyOn(store, "listActiveLoans").mockReturnValue([loan]);
+    jest.spyOn(store, "getCollateral").mockReturnValue(col);
+    jest.spyOn(store, "updateLoan").mockReturnValue({ ...loan });
+
+    await runHealthFactorJob();
+    await runHealthFactorJob(); // second run within the same process — cooldown active
+
+    // fireAlert is called but internally isCoolingDown suppresses the second; however
+    // maybeAlert itself gates before calling fireAlert, so it should only be called once.
+    expect(fireSpy).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ── runHealthFactorJob — job logic ────────────────────────────────────────────
 
 describe("runHealthFactorJob", () => {
   beforeEach(() => {
-    // Reset store state between tests
     jest.restoreAllMocks();
+    _resetAlertCooldowns();
+    jest.spyOn(alerting, "fireAlert").mockResolvedValue(undefined);
   });
 
   it("flags at_risk loans below threshold and returns updated count", async () => {
@@ -62,7 +151,7 @@ describe("runHealthFactorJob", () => {
       owner: "G1",
       animal_type: "cattle",
       count: 5,
-      appraised_value: 700, // HF < 10_000 → at_risk
+      appraised_value: 700,
       createdAt: new Date().toISOString(),
       deletedAt: null,
     };
@@ -95,7 +184,7 @@ describe("runHealthFactorJob", () => {
       owner: "G2",
       animal_type: "cattle",
       count: 5,
-      appraised_value: 1_000, // HF >= 10_000 → active
+      appraised_value: 1_000,
       createdAt: new Date().toISOString(),
       deletedAt: null,
     };
@@ -170,7 +259,6 @@ describe("runHealthFactorJob", () => {
 
     await runHealthFactorJob();
 
-    // null HF → newStatus = "active"; health_factor unchanged (null === null) but status same → no update
     expect(updateSpy).not.toHaveBeenCalled();
   });
 });

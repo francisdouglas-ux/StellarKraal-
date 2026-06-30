@@ -121,6 +121,8 @@ pub struct CollateralRecord {
     pub appraised_value: i128,
     /// ID of the loan this collateral is locked to; `0` means unlocked.
     pub loan_id: u64,
+    /// Rolling log of the last 3 appraised values (newest last).
+    pub appraisal_history: Vec<i128>,
 }
 
 /// On-chain record for a loan.
@@ -286,62 +288,6 @@ impl StellarKraal {
         Self::is_paused_raw(&env)
     }
 
-    // ── pause ─────────────────────────────────────────────────────────────
-    /// Pause the contract, blocking new loans and liquidations.
-    ///
-    /// # Security
-    /// Admin-only. Requires auth from `admin`.
-    pub fn pause(env: Env, admin: Address) -> Result<(), Error> {
-        Self::assert_initialized(&env)?;
-        Self::assert_admin(&env, &admin)?;
-        admin.require_auth();
-
-        if Self::is_paused_raw(&env) {
-            return Err(Error::AlreadyPaused);
-        }
-
-        let duration: u64 = env.storage().instance().get(&PAUSE_DUR).unwrap_or(24 * 3600); // Default 1 day
-        let expires_at = env.ledger().timestamp().checked_add(duration).ok_or(Error::ArithmeticOverflow)?;
-
-        env.storage().instance().set(&PAUSED, &true);
-        env.storage().instance().set(&PAUSE_EXP, &expires_at);
-        env.events().publish((symbol_short!("Pause"),), expires_at);
-        Ok(())
-    }
-
-    // ── unpause ───────────────────────────────────────────────────────────
-    /// Unpause the contract.
-    ///
-    /// # Security
-    /// Admin-only. Requires auth from `admin`.
-    pub fn unpause(env: Env, admin: Address) -> Result<(), Error> {
-        Self::assert_initialized(&env)?;
-        Self::assert_admin(&env, &admin)?;
-        admin.require_auth();
-
-        if !Self::is_paused_raw(&env) {
-            return Err(Error::NotPaused);
-        }
-
-        env.storage().instance().set(&PAUSED, &false);
-        env.storage().instance().set(&PAUSE_EXP, &0u64);
-        env.events().publish((symbol_short!("Unpause"),), env.ledger().timestamp());
-        Ok(())
-    }
-
-    // ── set_pause_duration ────────────────────────────────────────────────
-    /// Set the default duration for a pause.
-    ///
-    /// # Security
-    /// Admin-only. Requires auth from `admin`.
-    pub fn set_pause_duration(env: Env, admin: Address, duration: u64) -> Result<(), Error> {
-        Self::assert_initialized(&env)?;
-        Self::assert_admin(&env, &admin)?;
-        admin.require_auth();
-        env.storage().instance().set(&PAUSE_DUR, &duration);
-        Ok(())
-    }
-
     // ── update_oracle ─────────────────────────────────────────────────────
     /// Update the oracle address.
     ///
@@ -446,10 +392,11 @@ impl StellarKraal {
             count,
             appraised_value,
             loan_id: 0,
+            appraisal_history: history,
         };
         env.storage().persistent().set(&DataKey::Collateral(id), &record);
 
-        // Emit livestock_registered event
+        // Emit collateral_registered event
         env.events().publish(
             (symbol_short!("livestock"), Symbol::new(&env, "registered")),
             (id, record.owner.clone(), record.animal_type.clone(), record.count, record.appraised_value),
@@ -724,13 +671,29 @@ impl StellarKraal {
         let token_client = token::Client::new(&env, &token_addr);
         token_client.transfer(&liquidator, &env.current_contract_address(), &repay_amount);
 
+        let outstanding_before = loan.outstanding;
         loan.outstanding = loan.outstanding.checked_sub(repay_amount).ok_or(Error::InvalidAmount)?;
         if loan.outstanding == 0 {
             loan.status = LoanStatus::Liquidated;
         }
+
+        // Compute collateral_seized as proportional share of total collateral value.
+        // collateral_seized = repay_amount * total_collateral_value / outstanding_before
+        let collateral_seized = if outstanding_before > 0 {
+            repay_amount
+                .checked_mul(loan.total_collateral_value)
+                .unwrap_or(0)
+                / outstanding_before
+        } else {
+            0
+        };
+
+        let borrower = loan.borrower.clone();
         env.storage().persistent().set(&DataKey::Loan(loan_id), &loan);
 
         // Emit loan_liquidated event
+        // Topics: [symbol!(loan_liquidated), borrower, liquidator]
+        // Data:   { loan_id, repay_amount, collateral_seized }
         env.events().publish(
             (symbol_short!("loan"), Symbol::new(&env, "liquidated")),
             (loan_id, liquidator.clone(), repay_amount, loan.outstanding, loan.status.clone()),
@@ -801,6 +764,84 @@ impl StellarKraal {
         // Single instance read for the threshold, passed directly to avoid re-reading inside helper.
         let liq_thr: u32 = env.storage().instance().get(&LIQ_THR).unwrap();
         Self::compute_health_factor_with_thr(&loan, liq_thr)
+    }
+
+    // ── update_appraisal ──────────────────────────────────────────────────
+    /// Update the appraised value of a collateral record and append it to the
+    /// rolling 3-entry history log used for trend-based health factor analysis.
+    ///
+    /// # Parameters
+    /// - `owner`: Must be the collateral owner (auth required).
+    /// - `collateral_id`: ID of the collateral to update.
+    /// - `new_value`: New appraised value (must be > 0).
+    ///
+    /// # Errors
+    /// - [`Error::NotInitialized`] / [`Error::ContractPaused`]
+    /// - [`Error::CollateralNotFound`] if `collateral_id` is invalid.
+    /// - [`Error::Unauthorized`] if caller is not the collateral owner.
+    /// - [`Error::InvalidAmount`] if `new_value` ≤ 0.
+    pub fn update_appraisal(
+        env: Env,
+        owner: Address,
+        collateral_id: u64,
+        new_value: i128,
+    ) -> Result<(), Error> {
+        Self::assert_initialized(&env)?;
+        Self::assert_not_paused(&env)?;
+        if new_value <= 0 {
+            return Err(Error::InvalidAmount);
+        }
+        owner.require_auth();
+
+        let mut record: CollateralRecord = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Collateral(collateral_id))
+            .ok_or(Error::CollateralNotFound)?;
+
+        if record.owner != owner {
+            return Err(Error::Unauthorized);
+        }
+
+        // Maintain a rolling window of the last 3 appraisals (newest last).
+        if record.appraisal_history.len() >= 3 {
+            let mut new_hist = Vec::new(&env);
+            let start = record.appraisal_history.len() - 2;
+            for i in start..record.appraisal_history.len() {
+                new_hist.push_back(record.appraisal_history.get(i).unwrap());
+            }
+            record.appraisal_history = new_hist;
+        }
+        record.appraisal_history.push_back(new_value);
+        record.appraised_value = new_value;
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::Collateral(collateral_id), &record);
+
+        env.events().publish(
+            (symbol_short!("collat"), symbol_short!("appraised")),
+            (collateral_id, new_value),
+        );
+
+        Ok(())
+    }
+
+    // ── get_appraisal_history ─────────────────────────────────────────────
+    /// Return the rolling appraisal history (up to 3 entries) for a collateral.
+    ///
+    /// # Errors
+    /// - [`Error::CollateralNotFound`] if `collateral_id` is invalid.
+    pub fn get_appraisal_history(
+        env: Env,
+        collateral_id: u64,
+    ) -> Result<Vec<i128>, Error> {
+        let record: CollateralRecord = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Collateral(collateral_id))
+            .ok_or(Error::CollateralNotFound)?;
+        Ok(record.appraisal_history)
     }
 
     // ── get_loan ──────────────────────────────────────────────────────────
@@ -1002,13 +1043,18 @@ impl StellarKraal {
             return Err(Error::InvalidPrice);
         }
         
+        // Validate every submitted price individually before aggregating.
+        for price in prices.iter() {
+            if price <= 0 || price >= MAX_PRICE {
+                return Err(Error::InvalidPrice);
+            }
+        }
+
         let mut non_zero_prices = Vec::new(&env);
         let mut responses = 0;
         for price in prices.iter() {
-            if price > 0 {
-                non_zero_prices.push_back(price);
-                responses += 1;
-            }
+            non_zero_prices.push_back(price);
+            responses += 1;
         }
         
         let min_quorum = if oracles.len() >= 3 { 3 } else { oracles.len() };
@@ -1041,11 +1087,9 @@ impl StellarKraal {
         
         let mut flagged_count = 0;
         for price in prices.iter() {
-            if price > 0 {
-                let diff = if price > median { price - median } else { median - price };
-                if median > 0 && diff * 100 > median * 50 {
-                    flagged_count += 1;
-                }
+            let diff = if price > median { price - median } else { median - price };
+            if median > 0 && diff * 100 > median * 50 {
+                flagged_count += 1;
             }
         }
         

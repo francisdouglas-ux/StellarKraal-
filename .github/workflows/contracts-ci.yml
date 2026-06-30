@@ -21,16 +21,33 @@ jobs:
           profile: minimal
           override: true
 
+      - name: Add wasm32 target
+        run: rustup target add wasm32-unknown-unknown
+
       - name: Run Soroban contract tests
         run: |
-          set -o pipefail
-          cargo test --manifest-path contracts/stellarkraal/Cargo.toml 2>&1 | tee contract-test.log
-          test ${PIPESTATUS[0]} -eq 0 || true
+          cargo test --manifest-path contracts/stellarkraal/Cargo.toml
+          echo "Contract tests passed"
 
-      - name: Annotate contract failures
-        if: always()
+      - name: Build release WASM
         run: |
-          if grep -q 'test result: FAILED' contract-test.log; then
-            echo "::error file=contracts/stellarkraal/Cargo.toml::Soroban contract tests failed"
+          cargo build \
+            --manifest-path contracts/stellarkraal/Cargo.toml \
+            --target wasm32-unknown-unknown \
+            --release
+
+      - name: Check WASM size (100 kB limit)
+        run: |
+          WASM=$(find target/wasm32-unknown-unknown/release -name "*.wasm" -not -name "*.d" | head -1)
+          if [ -z "$WASM" ]; then
+            echo "::error::No WASM file found after build"
             exit 1
           fi
+          SIZE=$(wc -c < "$WASM")
+          LIMIT=102400
+          echo "WASM size: ${SIZE} bytes (limit: ${LIMIT} bytes)"
+          if [ "$SIZE" -gt "$LIMIT" ]; then
+            echo "::error file=${WASM}::WASM binary exceeds 100 kB limit (${SIZE} bytes > ${LIMIT} bytes)"
+            exit 1
+          fi
+          echo "WASM size OK: ${SIZE} bytes"

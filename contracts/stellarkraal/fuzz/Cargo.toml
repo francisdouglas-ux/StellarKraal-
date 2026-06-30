@@ -31,3 +31,10 @@ path = "fuzz_targets/loan_request.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "interest_rate"
+path = "fuzz_targets/interest_rate.rs"
+test = false
+doc = false
+bench = false

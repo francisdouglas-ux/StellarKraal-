@@ -78,8 +78,13 @@ import {
   type UpdateCollateralInput,
 } from "./validators/collateral";
 import rpcClient from "./utils/rpcClient";
+import { mapSorobanError } from "./utils/sorobanErrors";
 import { registerWebhook, getWebhooks, getDeliveryLogs, fireWebhooks } from "./webhooks";
 import { scheduleHealthFactorJob } from "./jobs/healthFactorJob";
+import { scheduleRepaymentReminderJob } from "./jobs/repaymentReminderJob";
+import { compressionMiddleware } from "./middleware/compression";
+import { apiKeyRouter, authenticateApiKey } from "./middleware/apiKey";
+import { v2Router } from "./routes/v2";
 import { httpActiveConnections, httpRequestDurationSeconds, httpRequestsTotal } from "./metrics";
 import { fireAlert } from "./utils/alerting";
 import { rules } from "./utils/alertRules";
@@ -116,6 +121,7 @@ const app = express();
 // Startup warning for CORS misconfiguration
 app.use(corsMiddleware);
 app.use(express.json());
+app.use(compressionMiddleware);
 
 // ── Health check — excluded from rate limiting and JWT ────────────────────────
 // GET /api/health
@@ -148,6 +154,12 @@ app.get("/api/health", async (_req: Request, res: Response) => {
  * @returns 200 { db, rpc, disk } if all components healthy; 503 if any are degraded.
  */
 app.use("/api/v1/health", healthRouter);
+
+// Add API-Version: 1 header to all v1 responses
+app.use("/api/v1", (_req: Request, res: Response, next: NextFunction) => {
+  res.setHeader("API-Version", "1");
+  next();
+});
 
 app.use(correlationMiddleware);
 // Request ID middleware
@@ -207,6 +219,12 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 // ── Auth ──────────────────────────────────────────────────────────────────────
 app.use("/api/auth", authLimiter, authRouter);
 app.use(jwtMiddleware);
+
+// ── API v2 stub ───────────────────────────────────────────────────────────────
+app.use("/api/v2", v2Router);
+
+// ── API key routes ────────────────────────────────────────────────────────────
+app.use("/api/v1/admin/api-keys", apiKeyRouter);
 
 // Configure appraisal cache TTL from env
 configureCacheTTL(parseInt(config.APPRAISAL_CACHE_TTL_MS, 10));
@@ -365,8 +383,12 @@ async function buildContractTx(
     .setTimeout(30)
     .build();
 
-  const prepared = await rpcClient.prepareTransaction(tx);
-  return prepared.toXDR();
+  try {
+    const prepared = await rpcClient.prepareTransaction(tx);
+    return prepared.toXDR();
+  } catch (err) {
+    throw mapSorobanError(err);
+  }
 }
 
 // ── Timeout constants ──────────────────────────────────────────────────────────
@@ -1595,6 +1617,7 @@ if (process.env.NODE_ENV !== "test") {
 }
 
 const healthFactorTask = scheduleHealthFactorJob();
+const repaymentReminderTask = scheduleRepaymentReminderJob();
 
 // ── Graceful Shutdown ─────────────────────────────────────────────────────────
 

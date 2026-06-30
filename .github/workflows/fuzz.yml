@@ -37,6 +37,10 @@ jobs:
         working-directory: contracts/stellarkraal
         run: cargo +nightly fuzz run loan_request -- -max_total_time=60
 
+      - name: Fuzz interest_rate (60s)
+        working-directory: contracts/stellarkraal
+        run: cargo +nightly fuzz run interest_rate -- -max_total_time=60
+
       - name: Upload crash artifacts
         if: failure()
         uses: actions/upload-artifact@v4

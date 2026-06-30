@@ -19,12 +19,16 @@
     "lint:fix": "eslint src --fix",
     "format": "prettier --write src",
     "format:check": "prettier --check src",
-    "openapi:sync": "node scripts/sync-openapi-version.js"
+    "openapi:sync": "node scripts/sync-openapi-version.js",
+    "generate:alert-rules": "ts-node -P tsconfig.json scripts/generate-alert-rules.ts"
   },
   "dependencies": {
     "@stellar/stellar-sdk": "^16.0.1",
-    "@typescript-eslint/eslint-plugin": "^8.62.1",
+    "@types/compression": "^1.7.5",
+    "@types/nodemailer": "^6.4.17",
+    "@typescript-eslint/eslint-plugin": "^8.62.0",
     "@typescript-eslint/parser": "^8.60.1",
+    "compression": "^1.7.5",
     "cors": "^2.8.5",
     "db-migrate": "^0.11.14",
     "db-migrate-sqlite3": "^0.4.0",
@@ -34,7 +38,8 @@
     "express-rate-limit": "^8.5.2",
     "multer": "^2.2.0",
     "node-cron": "^4.5.0",
-    "opossum": "^10.0.0",
+    "nodemailer": "^6.9.16",
+    "opossum": "^9.0.0",
     "prom-client": "^15.1.3",
     "uuid": "^14.0.1",
     "winston": "^3.11.0",

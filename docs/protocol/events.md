@@ -11,17 +11,18 @@ All events follow the Soroban `env.events().publish(topics, data)` convention:
 
 ## Events
 
-### `livestock / registered`
+### `collateral_registered`
 
 Emitted by `register_livestock` when a new collateral record is created.
 
-| Field | Type | Description |
-|---|---|---|
-| `id` | `u64` | Assigned collateral ID |
-| `owner` | `Address` | Owner's Stellar address |
-| `animal_type` | `Symbol` | Species symbol (e.g. `cattle`) |
-| `count` | `u32` | Number of animals |
-| `appraised_value` | `i128` | Oracle-appraised total value |
+| Field | Topic/Data | Type | Description |
+|---|---|---|---|
+| `collateral_registered` | topic[0] | `Symbol` | Event discriminator |
+| `owner` | topic[1] | `Address` | Owner's Stellar address |
+| `collateral_id` | data[0] | `u64` | Assigned collateral ID |
+| `animal_type` | data[1] | `Symbol` | Species symbol (e.g. `cattle`) |
+| `count` | data[2] | `u32` | Number of animals |
+| `appraised_value` | data[3] | `i128` | Oracle-appraised total value |
 
 ### `loan / requested`
 
@@ -46,17 +47,25 @@ Emitted by `repay_loan` after each repayment (partial or full).
 | `interest_paid` | `i128` | Amount of interest repaid in this transaction |
 | `remaining_balance` | `i128` | Remaining outstanding balance after repayment |
 
-### `loan / liquidated`
+### `loan_liquidated`
 
 Emitted by `liquidate` after a partial or full liquidation.
+
+**Topics:** `[symbol!(loan_liquidated), borrower, liquidator]`
+
+| Position | Value | Type | Description |
+|---|---|---|---|
+| topics[0] | `loan_liquidated` | `Symbol` | Event identifier |
+| topics[1] | `borrower` | `Address` | Borrower's Stellar address |
+| topics[2] | `liquidator` | `Address` | Liquidator's Stellar address |
+
+**Data:**
 
 | Field | Type | Description |
 |---|---|---|
 | `loan_id` | `u64` | Loan ID |
-| `liquidator` | `Address` | Liquidator's Stellar address |
 | `repay_amount` | `i128` | Amount repaid by the liquidator |
-| `outstanding` | `i128` | Remaining outstanding balance after liquidation |
-| `status` | `LoanStatus` | New loan status (`Active` or `Liquidated`) |
+| `collateral_seized` | `i128` | Proportional collateral value seized (`repay_amount × total_collateral_value / outstanding_before`) |
 
 ### `FeeCollect / <loan_id>` (internal)
 
@@ -69,10 +78,12 @@ Emitted when origination or interest fees are transferred to the treasury.
 
 ## Naming Convention
 
-Topics follow the pattern `(namespace, action)` using `symbol_short!` macros:
+Topics follow the pattern `(namespace, action)` using `symbol_short!` macros for
+two-part events, or `(event_name, addr1, addr2)` when addresses are embedded in topics
+for efficient indexed filtering:
 
 ```
-(symbol_short!("livestock"), symbol_short!("registered"))
+(Symbol::new(&env, "collateral_registered"), owner)   // collateral registration
 (symbol_short!("loan"),      symbol_short!("requested"))
 (Symbol::new(&env, "loan_repaid"), borrower_address)
 (symbol_short!("loan"),      symbol_short!("liquidated"))
