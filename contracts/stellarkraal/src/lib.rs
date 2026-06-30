@@ -32,7 +32,24 @@ const CLOSE_FACTOR: Symbol = symbol_short!("CLSFACT"); // close factor bps e.g. 
 const PAUSED: Symbol = symbol_short!("PAUSED");   // pause state flag
 const PAUSE_EXP: Symbol = symbol_short!("PAUSEXP"); // pause expiry timestamp
 const ORACLES: Symbol = symbol_short!("ORACLES");
-
+const PAUSE_DUR: Symbol = symbol_short!("PAUSEDUR");
+const PENDING_ADMIN: Symbol = symbol_short!("PEND_ADM");
+const TOTAL_BORROWED: Symbol = symbol_short!("TOT_BORR");
+const TOTAL_LIQUIDITY: Symbol = symbol_short!("TOT_LIQ");
+const BASE_RATE: Symbol = symbol_short!("BASERATE");
+const SLOPE1: Symbol = symbol_short!("SLOPE1");
+const SLOPE2: Symbol = symbol_short!("SLOPE2");
+const KINK: Symbol = symbol_short!("KINK");
+const PRICE_MIN: Symbol = symbol_short!("PRC_MIN");
+const PRICE_MAX: Symbol = symbol_short!("PRC_MAX");
+const STALE_THR: Symbol = symbol_short!("STALE_THR");
+const DEV_BPS: Symbol = symbol_short!("DEV_BPS");
+const LAST_PRICE: Symbol = symbol_short!("LST_PRC");
+const LAST_PRICE_TIME: Symbol = symbol_short!("LST_TIME");
+const TWAP_PRICE: Symbol = symbol_short!("TWAP_PRC");
+const TWAP_SUM: Symbol = symbol_short!("TWAP_SUM");
+const TWAP_COUNT: Symbol = symbol_short!("TWAP_CNT");
+const TWAP_WINDOW: Symbol = symbol_short!("TWAP_WIN");
 // ── Errors ───────────────────────────────────────────────────────────────────
 
 /// Contract-level errors returned by all public functions.
@@ -71,6 +88,9 @@ pub enum Error {
     InsufficientOracleQuorum = 17,
     InvalidPrice = 18,
     NotPaused = 19,
+    AlreadyInProgress = 20,
+    AlreadyPaused = 21,
+    ArithmeticOverflow = 22,
 }
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -101,6 +121,8 @@ pub struct CollateralRecord {
     pub appraised_value: i128,
     /// ID of the loan this collateral is locked to; `0` means unlocked.
     pub loan_id: u64,
+    /// Rolling log of the last 3 appraised values (newest last).
+    pub appraisal_history: Vec<i128>,
 }
 
 /// On-chain record for a loan.
@@ -266,62 +288,6 @@ impl StellarKraal {
         Self::is_paused_raw(&env)
     }
 
-    // ── pause ─────────────────────────────────────────────────────────────
-    /// Pause the contract, blocking new loans and liquidations.
-    ///
-    /// # Security
-    /// Admin-only. Requires auth from `admin`.
-    pub fn pause(env: Env, admin: Address) -> Result<(), Error> {
-        Self::assert_initialized(&env)?;
-        Self::assert_admin(&env, &admin)?;
-        admin.require_auth();
-
-        if Self::is_paused_raw(&env) {
-            return Err(Error::AlreadyPaused);
-        }
-
-        let duration: u64 = env.storage().instance().get(&PAUSE_DUR).unwrap_or(24 * 3600); // Default 1 day
-        let expires_at = env.ledger().timestamp().checked_add(duration).ok_or(Error::ArithmeticOverflow)?;
-
-        env.storage().instance().set(&PAUSED, &true);
-        env.storage().instance().set(&PAUSE_EXP, &expires_at);
-        env.events().publish((symbol_short!("Pause"),), expires_at);
-        Ok(())
-    }
-
-    // ── unpause ───────────────────────────────────────────────────────────
-    /// Unpause the contract.
-    ///
-    /// # Security
-    /// Admin-only. Requires auth from `admin`.
-    pub fn unpause(env: Env, admin: Address) -> Result<(), Error> {
-        Self::assert_initialized(&env)?;
-        Self::assert_admin(&env, &admin)?;
-        admin.require_auth();
-
-        if !Self::is_paused_raw(&env) {
-            return Err(Error::NotPaused);
-        }
-
-        env.storage().instance().set(&PAUSED, &false);
-        env.storage().instance().set(&PAUSE_EXP, &0u64);
-        env.events().publish((symbol_short!("Unpause"),), env.ledger().timestamp());
-        Ok(())
-    }
-
-    // ── set_pause_duration ────────────────────────────────────────────────
-    /// Set the default duration for a pause.
-    ///
-    /// # Security
-    /// Admin-only. Requires auth from `admin`.
-    pub fn set_pause_duration(env: Env, admin: Address, duration: u64) -> Result<(), Error> {
-        Self::assert_initialized(&env)?;
-        Self::assert_admin(&env, &admin)?;
-        admin.require_auth();
-        env.storage().instance().set(&PAUSE_DUR, &duration);
-        Ok(())
-    }
-
     // ── update_oracle ─────────────────────────────────────────────────────
     /// Update the oracle address.
     ///
@@ -419,19 +385,20 @@ impl StellarKraal {
         }
         owner.require_auth();
 
-        let id = Self::next_id(&env, DataKey::CollateralCounter);
+        let id = Self::next_id(&env, DataKey::CollateralCounter)?;
         let record = CollateralRecord {
             owner,
             animal_type,
             count,
             appraised_value,
             loan_id: 0,
+            appraisal_history: history,
         };
         env.storage().persistent().set(&DataKey::Collateral(id), &record);
 
-        // Emit livestock_registered event
+        // Emit collateral_registered event
         env.events().publish(
-            (symbol_short!("livestock"), symbol_short!("registered")),
+            (symbol_short!("livestock"), Symbol::new(&env, "registered")),
             (id, record.owner.clone(), record.animal_type.clone(), record.count, record.appraised_value),
         );
 
@@ -510,7 +477,7 @@ impl StellarKraal {
         let fee = amount.checked_mul(orig_fee_bps as i128).ok_or(Error::InvalidAmount)? / 10_000;
         let disbursement = amount.checked_sub(fee).ok_or(Error::InvalidAmount)?;
 
-        let loan_id = Self::next_id(&env, DataKey::LoanCounter);
+        let loan_id = Self::next_id(&env, DataKey::LoanCounter)?;
         let loan = LoanRecord {
             id: loan_id,
             borrower: borrower.clone(),
@@ -548,7 +515,7 @@ impl StellarKraal {
 
         // Emit loan_requested event
         env.events().publish(
-            (symbol_short!("loan"), symbol_short!("requested")),
+            (symbol_short!("loan"), Symbol::new(&env, "requested")),
             (loan_id, borrower.clone(), amount, disbursement, total_collateral_value),
         );
 
@@ -629,10 +596,12 @@ impl StellarKraal {
         }
         env.storage().persistent().set(&DataKey::Loan(loan_id), &loan);
 
+        let principal_paid = repay_amount.checked_sub(interest_portion).ok_or(Error::InvalidAmount)?;
+
         // Emit loan_repaid event
         env.events().publish(
-            (symbol_short!("loan"), symbol_short!("repaid")),
-            (loan_id, borrower.clone(), repay_amount, loan.outstanding, loan.status.clone()),
+            (Symbol::new(&env, "loan_repaid"), borrower.clone()),
+            (loan_id, principal_paid, interest_portion, loan.outstanding),
         );
 
         Ok(())
@@ -702,15 +671,31 @@ impl StellarKraal {
         let token_client = token::Client::new(&env, &token_addr);
         token_client.transfer(&liquidator, &env.current_contract_address(), &repay_amount);
 
+        let outstanding_before = loan.outstanding;
         loan.outstanding = loan.outstanding.checked_sub(repay_amount).ok_or(Error::InvalidAmount)?;
         if loan.outstanding == 0 {
             loan.status = LoanStatus::Liquidated;
         }
+
+        // Compute collateral_seized as proportional share of total collateral value.
+        // collateral_seized = repay_amount * total_collateral_value / outstanding_before
+        let collateral_seized = if outstanding_before > 0 {
+            repay_amount
+                .checked_mul(loan.total_collateral_value)
+                .unwrap_or(0)
+                / outstanding_before
+        } else {
+            0
+        };
+
+        let borrower = loan.borrower.clone();
         env.storage().persistent().set(&DataKey::Loan(loan_id), &loan);
 
         // Emit loan_liquidated event
+        // Topics: [symbol!(loan_liquidated), borrower, liquidator]
+        // Data:   { loan_id, repay_amount, collateral_seized }
         env.events().publish(
-            (symbol_short!("loan"), symbol_short!("liquidated")),
+            (symbol_short!("loan"), Symbol::new(&env, "liquidated")),
             (loan_id, liquidator.clone(), repay_amount, loan.outstanding, loan.status.clone()),
         );
 
@@ -781,6 +766,84 @@ impl StellarKraal {
         Self::compute_health_factor_with_thr(&loan, liq_thr)
     }
 
+    // ── update_appraisal ──────────────────────────────────────────────────
+    /// Update the appraised value of a collateral record and append it to the
+    /// rolling 3-entry history log used for trend-based health factor analysis.
+    ///
+    /// # Parameters
+    /// - `owner`: Must be the collateral owner (auth required).
+    /// - `collateral_id`: ID of the collateral to update.
+    /// - `new_value`: New appraised value (must be > 0).
+    ///
+    /// # Errors
+    /// - [`Error::NotInitialized`] / [`Error::ContractPaused`]
+    /// - [`Error::CollateralNotFound`] if `collateral_id` is invalid.
+    /// - [`Error::Unauthorized`] if caller is not the collateral owner.
+    /// - [`Error::InvalidAmount`] if `new_value` ≤ 0.
+    pub fn update_appraisal(
+        env: Env,
+        owner: Address,
+        collateral_id: u64,
+        new_value: i128,
+    ) -> Result<(), Error> {
+        Self::assert_initialized(&env)?;
+        Self::assert_not_paused(&env)?;
+        if new_value <= 0 {
+            return Err(Error::InvalidAmount);
+        }
+        owner.require_auth();
+
+        let mut record: CollateralRecord = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Collateral(collateral_id))
+            .ok_or(Error::CollateralNotFound)?;
+
+        if record.owner != owner {
+            return Err(Error::Unauthorized);
+        }
+
+        // Maintain a rolling window of the last 3 appraisals (newest last).
+        if record.appraisal_history.len() >= 3 {
+            let mut new_hist = Vec::new(&env);
+            let start = record.appraisal_history.len() - 2;
+            for i in start..record.appraisal_history.len() {
+                new_hist.push_back(record.appraisal_history.get(i).unwrap());
+            }
+            record.appraisal_history = new_hist;
+        }
+        record.appraisal_history.push_back(new_value);
+        record.appraised_value = new_value;
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::Collateral(collateral_id), &record);
+
+        env.events().publish(
+            (symbol_short!("collat"), symbol_short!("appraised")),
+            (collateral_id, new_value),
+        );
+
+        Ok(())
+    }
+
+    // ── get_appraisal_history ─────────────────────────────────────────────
+    /// Return the rolling appraisal history (up to 3 entries) for a collateral.
+    ///
+    /// # Errors
+    /// - [`Error::CollateralNotFound`] if `collateral_id` is invalid.
+    pub fn get_appraisal_history(
+        env: Env,
+        collateral_id: u64,
+    ) -> Result<Vec<i128>, Error> {
+        let record: CollateralRecord = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Collateral(collateral_id))
+            .ok_or(Error::CollateralNotFound)?;
+        Ok(record.appraisal_history)
+    }
+
     // ── get_loan ──────────────────────────────────────────────────────────
     /// Fetch a loan record by ID.
     ///
@@ -827,6 +890,31 @@ impl StellarKraal {
             records.push_back(col);
         }
         Ok(records)
+    }
+
+    // ── get_collateral_count ────────────────────────────────────────────────
+    /// Get the number of non-liquidated collaterals for an owner.
+    pub fn get_collateral_count(env: Env, owner: Address) -> u32 {
+        let counter: u64 = env.storage().instance().get(&DataKey::CollateralCounter).unwrap_or(0);
+        let mut count: u32 = 0;
+        for id in 1..=counter {
+            if let Some(col) = env.storage().persistent().get::<_, CollateralRecord>(&DataKey::Collateral(id)) {
+                if col.owner == owner {
+                    let mut is_liquidated = false;
+                    if col.loan_id > 0 {
+                        if let Some(loan) = env.storage().persistent().get::<_, LoanRecord>(&DataKey::Loan(col.loan_id)) {
+                            if loan.status == LoanStatus::Liquidated {
+                                is_liquidated = true;
+                            }
+                        }
+                    }
+                    if !is_liquidated {
+                        count += 1;
+                    }
+                }
+            }
+        }
+        count
     }
 
     // ── update_fee_config ─────────────────────────────────────────────────
@@ -881,55 +969,6 @@ impl StellarKraal {
             interest_fee_bps: int,
         })
     }
-
-    // ── set_pause_duration ────────────────────────────────────────────────
-    pub fn set_pause_duration(env: Env, admin: Address, duration: u64) -> Result<(), Error> {
-        Self::assert_initialized(&env)?;
-        admin.require_auth();
-        let stored_admin: Address = env.storage().instance().get(&ADMIN).ok_or(Error::NotInitialized)?;
-        if admin != stored_admin {
-            return Err(Error::Unauthorized);
-        }
-        env.storage().instance().set(&symbol_short!("PAUSEDUR"), &duration);
-        Ok(())
-    }
-
-    // ── pause ─────────────────────────────────────────────────────────────
-    pub fn pause(env: Env, admin: Address) -> Result<(), Error> {
-        Self::assert_initialized(&env)?;
-        admin.require_auth();
-        let stored_admin: Address = env.storage().instance().get(&ADMIN).ok_or(Error::NotInitialized)?;
-        if admin != stored_admin {
-            return Err(Error::Unauthorized);
-        }
-        env.storage().instance().set(&PAUSED, &true);
-        let duration: u64 = env.storage().instance().get(&symbol_short!("PAUSEDUR")).unwrap_or(0);
-        if duration > 0 {
-            let expires_at = env.ledger().timestamp().checked_add(duration).ok_or(Error::InvalidAmount)?;
-            env.storage().instance().set(&PAUSE_EXP, &expires_at);
-        } else {
-            env.storage().instance().set(&PAUSE_EXP, &0u64);
-        }
-        Ok(())
-    }
-
-    // ── unpause ───────────────────────────────────────────────────────────
-    pub fn unpause(env: Env, admin: Address) -> Result<(), Error> {
-        Self::assert_initialized(&env)?;
-        admin.require_auth();
-        let stored_admin: Address = env.storage().instance().get(&ADMIN).ok_or(Error::NotInitialized)?;
-        if admin != stored_admin {
-            return Err(Error::Unauthorized);
-        }
-        let paused: bool = env.storage().instance().get(&PAUSED).unwrap_or(false);
-        if !paused {
-            return Err(Error::NotPaused);
-        }
-        env.storage().instance().set(&PAUSED, &false);
-        env.storage().instance().set(&PAUSE_EXP, &0u64);
-        Ok(())
-    }
-
     // ── add_oracle ────────────────────────────────────────────────────────
     pub fn add_oracle(env: Env, admin: Address, oracle: Address) -> Result<(), Error> {
         Self::assert_initialized(&env)?;
@@ -1118,7 +1157,7 @@ impl StellarKraal {
             .checked_mul(liq_thr as i128)
             .ok_or(Error::InvalidAmount)?;
         let denominator = loan.outstanding.checked_mul(10_000).ok_or(Error::InvalidAmount)?;
-        Ok(numerator / denominator * 10_000)
+        Ok(numerator * 10_000 / denominator)
     }
 
     fn calculate_utilization(env: &Env) -> Result<u32, Error> {

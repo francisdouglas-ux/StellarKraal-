@@ -84,6 +84,6 @@ export const corsMiddleware: RequestHandler = (
   cors({
     origin: resolveOrigin(req),
     credentials: authRoute,
-    maxAge: 86400,
+    maxAge: 600,
   })(req, res, next);
 };

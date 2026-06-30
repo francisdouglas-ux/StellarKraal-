@@ -19,7 +19,8 @@
     "lint:fix": "eslint src --fix",
     "format": "prettier --write src",
     "format:check": "prettier --check src",
-    "openapi:sync": "node scripts/sync-openapi-version.js"
+    "openapi:sync": "node scripts/sync-openapi-version.js",
+    "generate:alert-rules": "ts-node -P tsconfig.json scripts/generate-alert-rules.ts"
   },
   "dependencies": {
     "@stellar/stellar-sdk": "^16.0.1",

@@ -108,6 +108,16 @@
           "legendFormat": "p95 wait ms"
         }
       ]
+    },
+    {
+      "id": 9,
+      "title": "Alert Rules",
+      "type": "text",
+      "gridPos": { "x": 0, "y": 22, "w": 24, "h": 4 },
+      "options": {
+        "mode": "markdown",
+        "content": "## Active Prometheus Alert Rules\n| Alert | Severity | Link |\n|---|---|---|\n| HighP99Latency | warning | [View](d/stellarkraal-backend?var-alert=HighP99Latency) |\n| HighErrorRate | critical | [View](d/stellarkraal-backend?var-alert=HighErrorRate) |\n| DbPoolExhaustion | critical | [View](d/stellarkraal-backend?var-alert=DbPoolExhaustion) |\n| RpcFailure | critical | [View](d/stellarkraal-backend?var-alert=rpc-failure) |\n| RpcCircuitOpen | critical | [View](d/stellarkraal-backend?var-alert=rpc-circuit-open) |\n| DbError | critical | [View](d/stellarkraal-backend?var-alert=db-error) |\n| LiquidationFailure | critical | [View](d/stellarkraal-backend?var-alert=liquidation-failure) |\n| 5xxSpike | critical | [View](d/stellarkraal-backend?var-alert=5xx-spike) |\n| BackupFailure | critical | [View](d/stellarkraal-backend?var-alert=backup-failure) |"
+      }
     }
   ]
 }

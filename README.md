@@ -239,3 +239,4 @@ website https://kraal-bloom-connect.lovable.app/
 ## License
 
 MIT © StellarKraal
+.
