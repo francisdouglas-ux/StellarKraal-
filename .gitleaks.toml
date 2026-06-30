@@ -37,5 +37,8 @@ regexes = [
   '''JWT_SECRET:\s*"change-me-to-a-strong-jwt-secret-min-32-chars"''',
   '''change-me-in-production-min-32-chars!!''',
   '''SLACK_WEBHOOK_URL=https://hooks\.slack\.com/services/YOUR/SLACK/WEBHOOK''',
-  '''SLACK_WEBHOOK_URL=https://hooks\.slack\.com/services/example'''
+  '''SLACK_WEBHOOK_URL=https://hooks\.slack\.com/services/example''',
+  # Stellar public keys (G + 55 base32 chars) are wallet addresses, not secrets.
+  # They are safe to commit and appear throughout test fixtures.
+  '''G[A-Z2-7]{55}'''
 ]

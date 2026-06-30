@@ -12,7 +12,7 @@ export interface AppraisalEntry {
   value: number;
   appraiser?: string;
 }
-export type CollateralStatus = "available" | "pledged" | "liquidated";
+export type CollateralStatus = 'available' | 'pledged' | 'liquidated';
 
 export interface CollateralRecord {
   id: string;
@@ -34,7 +34,7 @@ export interface CollateralRecord {
   deletedAt: string | null;
 }
 
-export type LoanStatus = "active" | "at_risk" | "repaid" | "liquidated";
+export type LoanStatus = 'active' | 'at_risk' | 'repaid' | 'liquidated';
 
 export interface LoanRecord {
   id: string;
@@ -54,8 +54,8 @@ export interface LoanSummary {
   atRiskCount: number;
 }
 
-export type TransactionType = "loan" | "repayment" | "liquidation";
-export type TransactionStatus = "pending" | "completed" | "failed";
+export type TransactionType = 'loan' | 'repayment' | 'liquidation';
+export type TransactionStatus = 'pending' | 'completed' | 'failed';
 
 export interface TransactionRecord {
   id: string;
@@ -84,10 +84,12 @@ const transactionTable: Map<string, TransactionRecord> = new Map();
  * const record = insertCollateral({ id: "1", owner: "G...", animal_type: "cattle", count: 5, appraised_value: 1000000 });
  */
 export function insertCollateral(
-  data: Omit<CollateralRecord, "createdAt" | "deletedAt" | "appraisal_history"> & { status?: CollateralStatus },
+  data: Omit<CollateralRecord, 'createdAt' | 'deletedAt' | 'appraisal_history'> & {
+    status?: CollateralStatus;
+  }
 ): CollateralRecord {
   const record: CollateralRecord = {
-    status: "available",
+    status: 'available',
     ...data,
     appraisal_history: [{ date: new Date().toISOString(), value: data.appraised_value }],
     createdAt: new Date().toISOString(),
@@ -108,7 +110,11 @@ export function addAppraisal(id: string, value: number, appraiser?: string): boo
   const r = collateralTable.get(id);
   if (!r || r.deletedAt !== null) return false;
   r.appraised_value = value;
-  r.appraisal_history.push({ date: new Date().toISOString(), value, ...(appraiser ? { appraiser } : {}) });
+  r.appraisal_history.push({
+    date: new Date().toISOString(),
+    value,
+    ...(appraiser ? { appraiser } : {}),
+  });
   return true;
 }
 
@@ -122,12 +128,12 @@ export function addAppraisal(id: string, value: number, appraiser?: string): boo
 export function getAppraisalHistory(
   id: string,
   page = 1,
-  limit = 20,
+  limit = 20
 ): { data: AppraisalEntry[]; total: number; page: number; limit: number } | null {
   const r = collateralTable.get(id);
   if (!r || r.deletedAt !== null) return null;
   const sorted = [...r.appraisal_history].sort(
-    (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
+    (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
   );
   const cappedLimit = Math.min(limit, 100);
   const safePage = Math.max(page, 1);
@@ -196,7 +202,7 @@ export function getCollateralIncludingDeleted(id: string): CollateralRecord | un
  */
 export function updateCollateral(
   id: string,
-  updates: Partial<Omit<CollateralRecord, "id" | "createdAt">>,
+  updates: Partial<Omit<CollateralRecord, 'id' | 'createdAt'>>
 ): CollateralRecord | undefined {
   const record = collateralTable.get(id);
   if (!record) return undefined;
@@ -247,11 +253,11 @@ export function listDeletedCollateral(): CollateralRecord[] {
  * const loan = insertLoan({ id: "1", borrower: "G...", collateral_id: "1", amount: 600000 });
  */
 export function insertLoan(
-  data: Omit<LoanRecord, "createdAt" | "deletedAt"> & { status?: LoanRecord["status"] },
+  data: Omit<LoanRecord, 'createdAt' | 'deletedAt'> & { status?: LoanRecord['status'] }
 ): LoanRecord {
   const record: LoanRecord = {
     ...data,
-    status: data.status ?? "active",
+    status: data.status ?? 'active',
     health_factor: data.health_factor ?? null,
     createdAt: new Date().toISOString(),
     deletedAt: null,
@@ -285,8 +291,10 @@ export function listLoans(filters?: {
   let results = [...loanTable.values()].filter((r) => r.deletedAt === null);
 
   if (filters?.status) results = results.filter((r) => r.status === filters.status);
-  if (filters?.borrowerAddress) results = results.filter((r) => r.borrower === filters.borrowerAddress);
-  if (filters?.from) results = results.filter((r) => new Date(r.createdAt) >= new Date(filters.from!));
+  if (filters?.borrowerAddress)
+    results = results.filter((r) => r.borrower === filters.borrowerAddress);
+  if (filters?.from)
+    results = results.filter((r) => new Date(r.createdAt) >= new Date(filters.from!));
   if (filters?.to) results = results.filter((r) => new Date(r.createdAt) <= new Date(filters.to!));
 
   // Sort by creation date descending
@@ -304,12 +312,12 @@ export function listLoans(filters?: {
  */
 export function listActiveLoans(): LoanRecord[] {
   return [...loanTable.values()].filter(
-    (r) => r.deletedAt === null && (r.status === "active" || r.status === "at_risk"),
+    (r) => r.deletedAt === null && (r.status === 'active' || r.status === 'at_risk')
   );
 }
 
 function normalizeHealthFactor(value: number | null | undefined): number | null {
-  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
     return null;
   }
   // Normalize store values that may be persisted either as ratio (e.g. 1.15)
@@ -328,7 +336,7 @@ export function getLoanSummaryForBorrower(borrower: string): LoanSummary {
     (r) =>
       r.deletedAt === null &&
       r.borrower === borrower &&
-      (r.status === "active" || r.status === "at_risk"),
+      (r.status === 'active' || r.status === 'at_risk')
   );
 
   const totalCollateralValue = activeLoans.reduce((sum, loan) => {
@@ -347,7 +355,7 @@ export function getLoanSummaryForBorrower(borrower: string): LoanSummary {
           (
             normalizedHealthFactors.reduce((sum, value) => sum + value, 0) /
             normalizedHealthFactors.length
-          ).toFixed(4),
+          ).toFixed(4)
         )
       : 0;
 
@@ -382,7 +390,7 @@ export function getLoan(id: string): LoanRecord | undefined {
  */
 export function updateLoan(
   id: string,
-  updates: Partial<Omit<LoanRecord, "id" | "createdAt">>,
+  updates: Partial<Omit<LoanRecord, 'id' | 'createdAt'>>
 ): LoanRecord | undefined {
   const record = loanTable.get(id);
   if (!record) return undefined;
@@ -432,8 +440,8 @@ export function isCollateralPledged(collateralId: string): boolean {
   return [...loanTable.values()].some(
     (r) =>
       r.collateral_id === collateralId &&
-      (r.status === "active" || r.status === "at_risk") &&
-      r.deletedAt === null,
+      (r.status === 'active' || r.status === 'at_risk') &&
+      r.deletedAt === null
   );
 }
 
@@ -457,7 +465,7 @@ export function runMigrations(): void {
  * const tx = insertTransaction({ borrower: "G...", type: "loan", status: "pending", amount: 600000 });
  */
 export function insertTransaction(
-  data: Omit<TransactionRecord, "id" | "createdAt" | "updatedAt">,
+  data: Omit<TransactionRecord, 'id' | 'createdAt' | 'updatedAt'>
 ): TransactionRecord {
   const id = `tx_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   const now = new Date().toISOString();
@@ -472,6 +480,8 @@ export function insertTransaction(
  * @param filters.borrower - Filter by borrower address.
  * @param filters.type - Filter by transaction type.
  * @param filters.status - Filter by status.
+ * @param filters.loanId - Filter by associated loan ID.
+ * @param filters.collateralId - Filter by associated collateral ID.
  * @param filters.startDate - ISO date string lower bound for `createdAt`.
  * @param filters.endDate - ISO date string upper bound for `createdAt`.
  * @param filters.page - Page number (1-indexed, default 1).
@@ -482,6 +492,8 @@ export function listTransactions(filters?: {
   borrower?: string;
   type?: TransactionType;
   status?: TransactionStatus;
+  loanId?: string;
+  collateralId?: string;
   startDate?: string;
   endDate?: string;
   page?: number;
@@ -495,6 +507,9 @@ export function listTransactions(filters?: {
   if (filters?.borrower) results = results.filter((t) => t.borrower === filters.borrower);
   if (filters?.type) results = results.filter((t) => t.type === filters.type);
   if (filters?.status) results = results.filter((t) => t.status === filters.status);
+  if (filters?.loanId) results = results.filter((t) => t.loanId === filters.loanId);
+  if (filters?.collateralId)
+    results = results.filter((t) => t.collateralId === filters.collateralId);
   if (filters?.startDate)
     results = results.filter((t) => new Date(t.createdAt) >= new Date(filters.startDate!));
   if (filters?.endDate)
@@ -527,7 +542,7 @@ export function getTransaction(id: string): TransactionRecord | undefined {
  */
 export function updateTransaction(
   id: string,
-  updates: Partial<Omit<TransactionRecord, "id" | "createdAt">>,
+  updates: Partial<Omit<TransactionRecord, 'id' | 'createdAt'>>
 ): TransactionRecord | undefined {
   const record = transactionTable.get(id);
   if (!record) return undefined;
@@ -554,7 +569,7 @@ const liquidationEventTable: Map<string, LiquidationEvent> = new Map();
  * @returns The created {@link LiquidationEvent}.
  */
 export function insertLiquidationEvent(
-  data: Omit<LiquidationEvent, "id" | "timestamp">,
+  data: Omit<LiquidationEvent, 'id' | 'timestamp'>
 ): LiquidationEvent {
   const id = `liq_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   const record: LiquidationEvent = { ...data, id, timestamp: new Date().toISOString() };

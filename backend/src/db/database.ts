@@ -5,17 +5,17 @@
  * - SQLite: used when DATABASE_URL is unset or starts with "sqlite:"
  * - PostgreSQL: used when DATABASE_URL starts with "postgres://" or "postgresql://"
  */
-import logger from "../utils/logger";
-import type { Pool as PgPool } from "pg";
+import logger from '../utils/logger';
+import type { Pool as PgPool } from 'pg';
 
-export type DbDriver = "sqlite" | "pg";
+export type DbDriver = 'sqlite' | 'pg';
 
 function resolveDriver(): DbDriver {
   const url = process.env.DATABASE_URL;
-  if (url && (url.startsWith("postgres://") || url.startsWith("postgresql://"))) {
-    return "pg";
+  if (url && (url.startsWith('postgres://') || url.startsWith('postgresql://'))) {
+    return 'pg';
   }
-  return "sqlite";
+  return 'sqlite';
 }
 
 export const activeDriver: DbDriver = resolveDriver();
@@ -24,9 +24,9 @@ export const activeDriver: DbDriver = resolveDriver();
 
 let pgPool: PgPool | undefined;
 
-if (activeDriver === "pg") {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
-  const { Pool } = require("pg") as { Pool: new (opts: Record<string, unknown>) => PgPool };
+if (activeDriver === 'pg') {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { Pool } = require('pg') as { Pool: new (opts: Record<string, unknown>) => PgPool };
   pgPool = new Pool({
     connectionString: process.env.DATABASE_URL,
     max: 10,
@@ -34,23 +34,33 @@ if (activeDriver === "pg") {
     connectionTimeoutMillis: 5_000,
   });
 
-  pgPool.on("error", (err: Error) => {
-    logger.error("Unexpected error on idle PostgreSQL client", { error: err.message });
+  pgPool.on('error', (err: Error) => {
+    logger.error('Unexpected error on idle PostgreSQL client', { error: err.message });
   });
 
-  logger.info("PostgreSQL connection pool initialised", { max: 10 });
+  logger.info('PostgreSQL connection pool initialised', { max: 10 });
 }
 
 export { pgPool };
 
 /**
- * Run a single query against the active PostgreSQL pool.
+ * Run a parameterized query against the active PostgreSQL pool.
+ *
+ * SQL injection prevention: all user-controlled values MUST be passed via the
+ * `params` array and referenced as $1, $2, … placeholders in `sql`. Never
+ * interpolate user input directly into the `sql` string — the pg driver
+ * handles escaping only through its parameterized query API.
+ *
+ * Audit (issue #617): confirmed no string interpolation is used in any
+ * call-site; `pgPool.query(sql, params)` always receives a separate params
+ * array so the driver can quote values safely.
+ *
  * Throws if called when the active driver is not 'pg'.
+ * @param sql - Parameterized SQL string with $1, $2, … placeholders.
+ * @param params - Array of values bound to the SQL placeholders.
+ * @returns Array of result rows cast to type T.
  */
-export async function pgQuery<T = unknown>(
-  sql: string,
-  params?: unknown[],
-): Promise<T[]> {
+export async function pgQuery<T = unknown>(sql: string, params: unknown[]): Promise<T[]> {
   if (!pgPool) {
     throw new Error("pgQuery called but driver is not 'pg'");
   }
@@ -60,16 +70,17 @@ export async function pgQuery<T = unknown>(
 
 /**
  * Returns health information for the active database driver.
+ * @returns Object with driver name, healthy flag, and optional detail message.
  */
 export async function dbHealth(): Promise<{ driver: DbDriver; healthy: boolean; detail?: string }> {
-  if (activeDriver === "pg" && pgPool) {
+  if (activeDriver === 'pg' && pgPool) {
     try {
-      await pgPool.query("SELECT 1");
-      return { driver: "pg", healthy: true };
+      await pgPool.query('SELECT 1');
+      return { driver: 'pg', healthy: true };
     } catch (err: any) {
-      return { driver: "pg", healthy: false, detail: err.message };
+      return { driver: 'pg', healthy: false, detail: err.message };
     }
   }
   // SQLite is always considered reachable (in-memory / file)
-  return { driver: "sqlite", healthy: true };
+  return { driver: 'sqlite', healthy: true };
 }
