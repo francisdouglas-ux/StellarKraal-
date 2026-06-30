@@ -279,6 +279,90 @@ fn setup() -> (Env, Address, Address, Address, Address, Address) {
         client.liquidate(&liquidator, &loan_id, &300_000i128);
     }
 
+    /// Verify that `liquidate` emits a `loan_liquidated` event with:
+    /// - topics: `(symbol!(loan_liquidated), borrower, liquidator)`
+    /// - data:   `(loan_id, repay_amount, collateral_seized)`
+    ///
+    /// The test drives the loan into an undercollateralised state by reducing
+    /// the appraised collateral value, then performs a partial liquidation and
+    /// asserts the event payload contains the correct addresses and amounts.
+    #[test]
+    fn test_liquidate_emits_loan_liquidated_event_with_correct_addresses() {
+        let (env, cid, admin, oracle, token, treasury) = setup();
+        init(&env, &cid, &admin, &oracle, &token, &treasury);
+        let client = StellarKraalClient::new(&env, &cid);
+
+        let borrower = Address::generate(&env);
+        let liquidator = Address::generate(&env);
+
+        // Register collateral worth 1_000_000 and borrow the LTV-max (60 %)
+        let col_id = client.register_livestock(
+            &borrower,
+            &symbol_short!("cattle"),
+            &2u32,
+            &1_000_000i128,
+        );
+        let loan_id = client.request_loan(&borrower, &vec![&env, col_id], &600_000i128);
+
+        // The liquidation threshold is 80 % of collateral value:
+        // hf = (1_000_000 * 8000) / (600_000 * 10_000) * 10_000 = 13_333 — healthy.
+        //
+        // To make it unhealthy we need hf < 10_000.  We manipulate the loan record
+        // directly via the Soroban test-environment's persistent storage so that the
+        // outstanding balance exceeds the threshold-adjusted collateral value without
+        // needing to change the collateral record or mint extra tokens.
+        //
+        // Unhealthy condition:  collateral(1_000_000) * 8000 / outstanding < 10_000
+        //                       outstanding > 800_000
+        // We set outstanding = 900_000 (> 800_000) to force hf < 10_000.
+        {
+            let mut loan: LoanRecord = env
+                .storage()
+                .persistent()
+                .get(&DataKey::Loan(loan_id))
+                .unwrap();
+            loan.outstanding = 900_000;
+            env.storage().persistent().set(&DataKey::Loan(loan_id), &loan);
+        }
+
+        // Liquidator repays 50 % of outstanding (close factor cap = 50 %)
+        let repay = 450_000i128;
+        client.liquidate(&liquidator, &loan_id, &repay);
+
+        // Inspect the emitted events.  The last event should be `loan_liquidated`.
+        let events = env.events().all();
+        let liq_event = events
+            .iter()
+            .rev()
+            .find(|e| {
+                // topics[0] is loan_liquidated symbol
+                e.0 == (
+                    symbol_short!("loan_liquidated"),
+                    borrower.clone(),
+                    liquidator.clone(),
+                )
+            })
+            .expect("loan_liquidated event not found");
+
+        // Verify data: (loan_id, repay_amount, collateral_seized)
+        // collateral_seized = repay * total_collateral_value / outstanding_before
+        //                   = 450_000 * 1_000_000 / 900_000 = 500_000
+        let data: (u64, i128, i128) = liq_event.1.clone().into_val(&env);
+        assert_eq!(data.0, loan_id, "loan_id mismatch in event data");
+        assert_eq!(data.1, repay, "repay_amount mismatch in event data");
+        assert_eq!(data.2, 500_000i128, "collateral_seized mismatch in event data");
+
+        // Confirm topics carry the right addresses
+        let (topic_symbol, topic_borrower, topic_liquidator): (
+            soroban_sdk::Symbol,
+            Address,
+            Address,
+        ) = liq_event.0.clone().into_val(&env);
+        assert_eq!(topic_symbol, symbol_short!("loan_liquidated"));
+        assert_eq!(topic_borrower, borrower);
+        assert_eq!(topic_liquidator, liquidator);
+    }
+
     // ── get_loan / get_collateral ─────────────────────────────────────────
     #[test]
     fn test_get_loan_ok() {

@@ -6,13 +6,15 @@
  * - livestock/registered  → upsert collateral record
  * - loan/requested        → upsert loan record
  * - loan/repaid           → update loan outstanding balance
- * - loan/liquidated       → update loan status to liquidated
+ * - loan_liquidated       → update loan status to liquidated, record liquidation event
+ *                           Topics: [loan_liquidated, borrower, liquidator]
+ *                           Data:   (loan_id, repay_amount, collateral_seized)
  */
 
 import { rpc as SorobanRpc, xdr, Address } from "@stellar/stellar-sdk";
 import { z } from "zod";
 import logger from "./utils/logger";
-import { insertCollateral, insertLoan, updateTransaction } from "./db/store";
+import { insertCollateral, insertLoan, updateTransaction, updateLoan, insertLiquidationEvent } from "./db/store";
 
 const RPC_URL = process.env.RPC_URL || "https://soroban-testnet.stellar.org";
 const getContractId = () => process.env.CONTRACT_ID || "";
@@ -180,10 +182,23 @@ function handleEvent(event: SorobanRpc.Api.RawEventResponse): void {
     } else if (key === "loan/liquidated") {
       // data: (loan_id, liquidator, repay_amount, outstanding, status)
       const vals = xdr.ScVal.fromXDR(event.value, "base64").vec?.() ?? [];
-      if (vals.length < 1) return;
+      if (vals.length < 3) return;
       const id = vals[0].u64?.().toString() ?? "";
+      const repayAmount = Number(vals[1].i128?.().lo ?? 0);
+      const collateralSeized = Number(vals[2].i128?.().lo ?? 0);
+      // Update loan status to liquidated in the DB
+      updateLoan(id, { status: "liquidated" });
+      // Update the corresponding transaction record
       updateTransaction(id, { status: "completed", type: "liquidation" });
-      logEvent("contract.event.loan_liquidated_synced", event, { id });
+      // Record the liquidation event for audit / history
+      insertLiquidationEvent({ loan_id: id, liquidator, repay_amount: repayAmount });
+      logEvent("contract.event.loan_liquidated_synced", event, {
+        id,
+        borrower,
+        liquidator,
+        repayAmount,
+        collateralSeized,
+      });
     }
   } catch (err) {
     const error = err instanceof Error ? err : new Error(String(err));

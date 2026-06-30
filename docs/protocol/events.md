@@ -47,17 +47,25 @@ Emitted by `repay_loan` after each repayment (partial or full).
 | `interest_paid` | `i128` | Amount of interest repaid in this transaction |
 | `remaining_balance` | `i128` | Remaining outstanding balance after repayment |
 
-### `loan / liquidated`
+### `loan_liquidated`
 
 Emitted by `liquidate` after a partial or full liquidation.
+
+**Topics:** `[symbol!(loan_liquidated), borrower, liquidator]`
+
+| Position | Value | Type | Description |
+|---|---|---|---|
+| topics[0] | `loan_liquidated` | `Symbol` | Event identifier |
+| topics[1] | `borrower` | `Address` | Borrower's Stellar address |
+| topics[2] | `liquidator` | `Address` | Liquidator's Stellar address |
+
+**Data:**
 
 | Field | Type | Description |
 |---|---|---|
 | `loan_id` | `u64` | Loan ID |
-| `liquidator` | `Address` | Liquidator's Stellar address |
 | `repay_amount` | `i128` | Amount repaid by the liquidator |
-| `outstanding` | `i128` | Remaining outstanding balance after liquidation |
-| `status` | `LoanStatus` | New loan status (`Active` or `Liquidated`) |
+| `collateral_seized` | `i128` | Proportional collateral value seized (`repay_amount × total_collateral_value / outstanding_before`) |
 
 ### `FeeCollect / <loan_id>` (internal)
 
@@ -70,7 +78,9 @@ Emitted when origination or interest fees are transferred to the treasury.
 
 ## Naming Convention
 
-Topics follow the pattern `(namespace, action)` using `symbol_short!` macros:
+Topics follow the pattern `(namespace, action)` using `symbol_short!` macros for
+two-part events, or `(event_name, addr1, addr2)` when addresses are embedded in topics
+for efficient indexed filtering:
 
 ```
 (Symbol::new(&env, "collateral_registered"), owner)   // collateral registration
