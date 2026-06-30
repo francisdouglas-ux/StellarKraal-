@@ -76,6 +76,17 @@ Emitted when origination or interest fees are transferred to the treasury.
 | `fee_type` | `Symbol` | `originate` or `interest` |
 | `amount` | `i128` | Fee amount collected |
 
+### `fee / cfgUpd`
+
+Emitted by `update_fee_config` after a successful fee parameter change.
+
+| Field | Type | Description |
+|---|---|---|
+| `old_origination_fee_bps` | `u32` | Previous origination fee in basis points |
+| `old_interest_fee_bps` | `u32` | Previous interest fee in basis points |
+| `new_origination_fee_bps` | `u32` | New origination fee in basis points |
+| `new_interest_fee_bps` | `u32` | New interest fee in basis points |
+
 ## Naming Convention
 
 Topics follow the pattern `(namespace, action)` using `symbol_short!` macros for
@@ -87,6 +98,7 @@ for efficient indexed filtering:
 (symbol_short!("loan"),      symbol_short!("requested"))
 (Symbol::new(&env, "loan_repaid"), borrower_address)
 (symbol_short!("loan"),      symbol_short!("liquidated"))
+(symbol_short!("fee"),       symbol_short!("cfgUpd"))
 ```
 
 ## Backend Event Listener
