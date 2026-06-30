@@ -105,6 +105,22 @@
         }
       }
     },
+    "/collateral/register/batch": {
+      "post": {
+        "tags": ["collateral"],
+        "summary": "Batch register livestock collateral (on-chain)",
+        "description": "Builds unsigned Soroban transactions for up to 50 livestock collateral registrations in a single request.",
+        "operationId": "batchRegisterCollateral",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BatchRegisterCollateralRequest" } } } },
+        "responses": {
+          "200": { "description": "Array of unsigned XDR transactions, one per item in input order", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BatchRegisterCollateralResponse" } } } },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/InternalError" }
+        }
+      }
+    },
     "/collateral": {
       "post": {
         "tags": ["collateral"],
@@ -618,6 +634,30 @@
           "animal_type": { "type": "string", "example": "cattle" },
           "count": { "type": "integer", "minimum": 1, "example": 5 },
           "appraised_value": { "type": "integer", "minimum": 1, "description": "Total appraised value in token base units", "example": 5000000 }
+        }
+      },
+      "BatchRegisterCollateralRequest": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "description": "List of collateral registrations (1–50 items)",
+            "minItems": 1,
+            "maxItems": 50,
+            "items": { "$ref": "#/components/schemas/RegisterCollateralRequest" }
+          }
+        }
+      },
+      "BatchRegisterCollateralResponse": {
+        "type": "object",
+        "required": ["results"],
+        "properties": {
+          "results": {
+            "type": "array",
+            "description": "Unsigned XDR transactions, one per input item in order",
+            "items": { "$ref": "#/components/schemas/XdrResponse" }
+          }
         }
       },
       "V1CreateCollateralRequest": {

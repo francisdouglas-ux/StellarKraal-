@@ -10,6 +10,7 @@ const adminNav = [
   { label: 'Statistics', href: '/admin/statistics' },
   { label: 'Users', href: '/admin/users' },
   { label: 'Reports', href: '/admin/reports' },
+  { label: 'Liquidators', href: '/admin/liquidators' },
 ];
 
 interface AdminRootLayoutProps {

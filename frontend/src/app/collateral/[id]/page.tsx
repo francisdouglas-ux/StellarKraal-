@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { PriceChart } from "@/components/PriceChart";
 
 interface AppraisalEntry {
   date: string;
@@ -121,6 +122,14 @@ export default function CollateralDetailPage() {
             </tbody>
           </table>
         )}
+      </div>
+
+      {/* Price history chart */}
+      <div className="mt-6">
+        <PriceChart
+          url={`${API}/api/v1/collateral/${id}/appraisals`}
+          label="Price History"
+        />
       </div>
     </main>
   );

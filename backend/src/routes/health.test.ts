@@ -45,6 +45,91 @@ function buildApp(): Express {
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
+describe("GET /api/v1/health/live", () => {
+  let app: Express;
+
+  beforeEach(() => {
+    app = buildApp();
+  });
+
+  it("returns 200", async () => {
+    const res = await request(app).get("/api/v1/health/live");
+    expect(res.status).toBe(200);
+  });
+
+  it("returns { status: 'alive' }", async () => {
+    const res = await request(app).get("/api/v1/health/live");
+    expect(res.body.status).toBe("alive");
+  });
+
+  it("responds with JSON content-type", async () => {
+    const res = await request(app).get("/api/v1/health/live");
+    expect(res.headers["content-type"]).toMatch(/application\/json/);
+  });
+});
+
+describe("GET /api/v1/health/ready", () => {
+  let app: Express;
+
+  beforeEach(() => {
+    app = buildApp();
+    jest.clearAllMocks();
+  });
+
+  describe("all dependencies reachable", () => {
+    beforeEach(() => {
+      mockCheckDbHealth.mockResolvedValue(true);
+      mockRpcGetHealth.mockResolvedValue({ status: "healthy" } as any);
+    });
+
+    it("returns 200", async () => {
+      const res = await request(app).get("/api/v1/health/ready");
+      expect(res.status).toBe(200);
+    });
+
+    it("returns { status: 'ready', db: 'ok', rpc: 'ok' }", async () => {
+      const res = await request(app).get("/api/v1/health/ready");
+      expect(res.body).toMatchObject({ status: "ready", db: "ok", rpc: "ok" });
+    });
+  });
+
+  describe("db unreachable", () => {
+    beforeEach(() => {
+      mockCheckDbHealth.mockResolvedValue(false);
+      mockRpcGetHealth.mockResolvedValue({ status: "healthy" } as any);
+    });
+
+    it("returns 503", async () => {
+      const res = await request(app).get("/api/v1/health/ready");
+      expect(res.status).toBe(503);
+    });
+
+    it("returns { status: 'not_ready', db: 'degraded' }", async () => {
+      const res = await request(app).get("/api/v1/health/ready");
+      expect(res.body.status).toBe("not_ready");
+      expect(res.body.db).toBe("degraded");
+    });
+  });
+
+  describe("rpc unreachable", () => {
+    beforeEach(() => {
+      mockCheckDbHealth.mockResolvedValue(true);
+      mockRpcGetHealth.mockRejectedValue(new Error("connection refused"));
+    });
+
+    it("returns 503", async () => {
+      const res = await request(app).get("/api/v1/health/ready");
+      expect(res.status).toBe(503);
+    });
+
+    it("returns { status: 'not_ready', rpc: 'degraded' }", async () => {
+      const res = await request(app).get("/api/v1/health/ready");
+      expect(res.body.status).toBe("not_ready");
+      expect(res.body.rpc).toBe("degraded");
+    });
+  });
+});
+
 describe("GET /api/v1/health/deep", () => {
   let app: Express;
 

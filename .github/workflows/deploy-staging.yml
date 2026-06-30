@@ -63,6 +63,10 @@ jobs:
           STAGING_FRONTEND_URL: ${{ secrets.STAGING_FRONTEND_URL }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
 
+      - name: Run smoke tests
+        working-directory: ./backend
+        run: npm run test:smoke
+
   notify:
     name: Slack Notification
     needs: deploy-staging

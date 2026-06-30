@@ -63,6 +63,43 @@ async function checkDiskHealth(): Promise<boolean> {
 const healthRouter = Router();
 
 /**
+ * GET /health/live
+ *
+ * Liveness probe — confirms the process is running and can accept requests.
+ * No dependency checks; Kubernetes restarts the pod only when this fails.
+ *
+ * @returns 200 `{ status: "alive" }`
+ */
+healthRouter.get("/live", (_req: Request, res: Response) => {
+  res.status(200).json({ status: "alive" });
+});
+
+/**
+ * GET /health/ready
+ *
+ * Readiness probe — confirms external dependencies (DB, Soroban RPC) are
+ * reachable. Kubernetes stops routing traffic when this returns 503.
+ *
+ * @returns 200 `{ status: "ready", db, rpc }` — all dependencies reachable
+ * @returns 503 `{ status: "not_ready", db, rpc }` — one or more unreachable
+ */
+healthRouter.get("/ready", async (_req: Request, res: Response) => {
+  const [dbHealthy, rpcHealthy] = await Promise.allSettled([
+    checkDbHealth(),
+    rpcClient.getHealth().then(() => true).catch(() => false),
+  ]).then((results) =>
+    results.map((r) => (r.status === "fulfilled" ? r.value : false))
+  );
+
+  const ready = dbHealthy && rpcHealthy;
+  res.status(ready ? 200 : 503).json({
+    status: ready ? "ready" : "not_ready",
+    db: dbHealthy ? "ok" : "degraded",
+    rpc: rpcHealthy ? "ok" : "degraded",
+  });
+});
+
+/**
  * GET /health/deep
  *
  * Returns the health status of each infrastructure component.
@@ -87,6 +124,23 @@ healthRouter.get("/deep", async (_req: Request, res: Response) => {
 
   const allHealthy = dbHealthy && rpcHealthy && diskHealthy;
   res.status(allHealthy ? 200 : 503).json(body);
+});
+
+/**
+ * GET /health/live
+ * Kubernetes-style liveness probe. Returns 200 if the process is alive.
+ */
+healthRouter.get("/live", (_req: Request, res: Response) => {
+  res.status(200).json({ status: "alive" });
+});
+
+/**
+ * GET /health/ready
+ * Kubernetes-style readiness probe. Returns 200 only when the DB is reachable.
+ */
+healthRouter.get("/ready", async (_req: Request, res: Response) => {
+  const dbHealthy = await checkDbHealth();
+  res.status(dbHealthy ? 200 : 503).json({ status: dbHealthy ? "ready" : "not_ready" });
 });
 
 export { healthRouter, checkDiskHealth };

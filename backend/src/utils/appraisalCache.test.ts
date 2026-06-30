@@ -57,68 +57,76 @@ describe("appraisalCache — cache hit / miss", () => {
 });
 
 describe("appraisalCache — TTL and stale flag", () => {
-  it("defaults to a 5-minute TTL", () => {
-    setAppraisal("col-ttl", 999);
-    const entry = getAppraisal("col-ttl");
-    expect(entry).not.toBeNull();
-    expect(entry!.stale).toBe(false);
+  beforeEach(() => {
+    jest.useFakeTimers();
   });
 
-  it("flags entry as stale when TTL has elapsed", () => {
-    configureCacheTTL(1); // 1 ms TTL
-    setAppraisal("col-stale", 500);
-    return new Promise<void>((resolve) => {
-      setTimeout(() => {
-        const entry = getAppraisal("col-stale");
-        expect(entry).not.toBeNull();
-        expect(entry!.stale).toBe(true);
-        resolve();
-      }, 10);
-    });
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it("entry is retrievable before TTL expires", () => {
+    configureCacheTTL(5_000);
+    setAppraisal("col-fresh", 999);
+    jest.advanceTimersByTime(4_999);
+    const entry = getAppraisal("col-fresh");
+    expect(entry).not.toBeNull();
+    expect(entry!.stale).toBe(false);
+    expect(entry!.value).toBe(999);
+  });
+
+  it("entry returns undefined (null) after TTL expires", () => {
+    configureCacheTTL(5_000);
+    setAppraisal("col-expired", 500);
+    jest.advanceTimersByTime(5_001);
+    const entry = getAppraisal("col-expired");
+    expect(entry).not.toBeNull(); // still present but stale
+    expect(entry!.stale).toBe(true);
+  });
+
+  it("configureCacheTTL changes expiry for subsequent entries", () => {
+    // Set a long TTL and store an entry
+    configureCacheTTL(60_000);
+    setAppraisal("col-a", 100);
+    // Entry is fresh immediately
+    expect(getAppraisal("col-a")!.stale).toBe(false);
+
+    // Advance time but stay within TTL
+    jest.advanceTimersByTime(5_000);
+    expect(getAppraisal("col-a")!.stale).toBe(false);
+
+    // Shorten TTL — new entries use the new TTL, and existing reads now use the shorter TTL too
+    configureCacheTTL(1_000);
+    setAppraisal("col-b", 200);
+    // col-b is fresh immediately
+    expect(getAppraisal("col-b")!.stale).toBe(false);
+
+    // Advance past the new TTL
+    jest.advanceTimersByTime(1_001);
+    // col-b (set after TTL change) is now stale
+    expect(getAppraisal("col-b")!.stale).toBe(true);
   });
 
   it("logs a stale cache access", () => {
-    configureCacheTTL(1);
+    configureCacheTTL(1_000);
     setAppraisal("col-stale-log", 200);
-    return new Promise<void>((resolve) => {
-      setTimeout(() => {
-        getAppraisal("col-stale-log");
-        expect(mockLogger.debug).toHaveBeenCalledWith(
-          "appraisal_cache_stale",
-          expect.objectContaining({ collateralId: "col-stale-log" }),
-        );
-        resolve();
-      }, 10);
-    });
+    jest.advanceTimersByTime(1_001);
+    getAppraisal("col-stale-log");
+    expect(mockLogger.debug).toHaveBeenCalledWith(
+      "appraisal_cache_stale",
+      expect.objectContaining({ collateralId: "col-stale-log" }),
+    );
   });
 
   it("does not mutate the stored entry when returning stale", () => {
-    configureCacheTTL(1);
+    configureCacheTTL(1_000);
     setAppraisal("col-immutable", 300);
-    return new Promise<void>((resolve) => {
-      setTimeout(() => {
-        const first = getAppraisal("col-immutable");
-        const second = getAppraisal("col-immutable");
-        // Both reads should still return the entry (not deleted)
-        expect(first).not.toBeNull();
-        expect(second).not.toBeNull();
-        expect(_cacheSize()).toBe(1);
-        resolve();
-      }, 10);
-    });
-  });
-
-  it("respects a custom TTL set via configureCacheTTL", () => {
-    configureCacheTTL(50);
-    setAppraisal("col-custom-ttl", 777);
-    // Should be fresh immediately
-    expect(getAppraisal("col-custom-ttl")!.stale).toBe(false);
-    return new Promise<void>((resolve) => {
-      setTimeout(() => {
-        expect(getAppraisal("col-custom-ttl")!.stale).toBe(true);
-        resolve();
-      }, 60);
-    });
+    jest.advanceTimersByTime(1_001);
+    const first = getAppraisal("col-immutable");
+    const second = getAppraisal("col-immutable");
+    expect(first).not.toBeNull();
+    expect(second).not.toBeNull();
+    expect(_cacheSize()).toBe(1);
   });
 });
 
@@ -186,6 +194,10 @@ describe("appraisalCache — cache invalidation on oracle price update", () => {
 });
 
 describe("appraisalCache — stale: true in response shape", () => {
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
   it("returned entry includes stale: false when fresh", () => {
     setAppraisal("col-resp", 1500);
     const entry = getAppraisal("col-resp");
@@ -193,14 +205,11 @@ describe("appraisalCache — stale: true in response shape", () => {
   });
 
   it("returned entry includes stale: true when expired", () => {
-    configureCacheTTL(1);
+    jest.useFakeTimers();
+    configureCacheTTL(5_000);
     setAppraisal("col-resp-stale", 1500);
-    return new Promise<void>((resolve) => {
-      setTimeout(() => {
-        const entry = getAppraisal("col-resp-stale");
-        expect(entry).toMatchObject({ value: 1500, stale: true });
-        resolve();
-      }, 10);
-    });
+    jest.advanceTimersByTime(5_001);
+    const entry = getAppraisal("col-resp-stale");
+    expect(entry).toMatchObject({ value: 1500, stale: true });
   });
 });

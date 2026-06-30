@@ -53,6 +53,12 @@ const rpcMethods = {
     logger.debug("RPC getHealth", { correlationId });
     return pool.run((server) => server.getHealth());
   },
+
+  getTransaction: async (hash: string) => {
+    const correlationId = getCorrelationId();
+    logger.debug("RPC getTransaction", { hash, correlationId });
+    return pool.run((server) => server.getTransaction(hash));
+  },
 };
 
 /**
@@ -74,6 +80,10 @@ const getHealthBreaker = new CircuitBreaker(
   rpcMethods.getHealth,
   circuitBreakerOptions
 );
+const getTransactionBreaker = new CircuitBreaker(
+  rpcMethods.getTransaction,
+  circuitBreakerOptions
+);
 
 // Circuit breaker event logging + alerting
 [
@@ -81,6 +91,7 @@ const getHealthBreaker = new CircuitBreaker(
   prepareTransactionBreaker,
   simulateTransactionBreaker,
   getHealthBreaker,
+  getTransactionBreaker,
 ].forEach((breaker) => {
   breaker.on("open", () => {
     logger.error("Circuit breaker opened", { breaker: breaker.name, correlationId: getCorrelationId() });
@@ -115,7 +126,8 @@ export const rpcClient = {
   prepareTransaction: (tx: any) => prepareTransactionBreaker.fire(tx),
   simulateTransaction: (tx: any) => simulateTransactionBreaker.fire(tx),
   getHealth: () => getHealthBreaker.fire(),
-  
+  getTransaction: (hash: string) => getTransactionBreaker.fire(hash),
+
   /**
    * Get circuit breaker states for health check.
    * @returns An object mapping each RPC method to its circuit breaker state.
@@ -125,6 +137,7 @@ export const rpcClient = {
     prepareTransaction: prepareTransactionBreaker.opened ? "open" : "closed",
     simulateTransaction: simulateTransactionBreaker.opened ? "open" : "closed",
     getHealth: getHealthBreaker.opened ? "open" : "closed",
+    getTransaction: getTransactionBreaker.opened ? "open" : "closed",
   }),
 
   /**
@@ -136,7 +149,8 @@ export const rpcClient = {
       !getAccountBreaker.opened &&
       !prepareTransactionBreaker.opened &&
       !simulateTransactionBreaker.opened &&
-      !getHealthBreaker.opened
+      !getHealthBreaker.opened &&
+      !getTransactionBreaker.opened
     );
   },
 };

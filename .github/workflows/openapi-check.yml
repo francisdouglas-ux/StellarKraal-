@@ -19,9 +19,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Validate OpenAPI 3.0 spec
-        run: npx --yes @redocly/cli@1.x lint --extends=minimal backend/openapi.json
-
       - name: Check spec is committed
         run: |
           if [ ! -f backend/openapi.json ]; then
@@ -29,6 +26,9 @@ jobs:
             exit 1
           fi
           echo "openapi.json present"
+
+      - name: Validate OpenAPI 3.0 spec (strict)
+        run: npx --yes @redocly/cli@1.x lint --extends=recommended backend/openapi.json
 
       - name: Verify info.version matches package.json
         run: |
@@ -40,3 +40,97 @@ jobs:
             exit 1
           fi
           echo "info.version matches package.json ($PKG_VERSION)"
+
+  validate-spec-against-server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install backend dependencies
+        run: npm ci
+        working-directory: backend
+
+      - name: Start backend server
+        env:
+          NODE_ENV: test
+          PORT: "3001"
+          RPC_URL: "https://soroban-testnet.stellar.org"
+          CONTRACT_ID: "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4"
+          JWT_SECRET: "ci-test-jwt-secret-at-least-16-chars" # gitleaks:allow
+          WEBHOOK_SECRET: "ci-test-webhook-secret-16"
+        run: |
+          npm run build
+          node dist/index.js &
+          echo "SERVER_PID=$!" >> "$GITHUB_ENV"
+          # Wait for server to be ready (up to 30 s)
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:3001/api/v1/health && break
+            sleep 1
+          done
+        working-directory: backend
+
+      - name: Validate spec routes exist on running server
+        run: |
+          node - <<'EOF'
+          const fs = require("fs");
+          const http = require("http");
+
+          const spec = JSON.parse(fs.readFileSync("backend/openapi.json", "utf8"));
+          const BASE = "http://localhost:3001/api/v1";
+
+          const SKIP_METHODS = new Set(["put", "patch", "delete"]);
+          const SKIP_PATHS = new Set([
+            "/collateral/{id}",
+            "/collateral/{id}/appraise",
+            "/collateral/{id}/restore",
+            "/loan/{id}",
+            "/health/{loanId}",
+            "/transactions/{hash}/status",
+            "/webhooks/{id}",
+            "/admin/restore/collateral/{id}",
+          ]);
+
+          async function probe(method, path) {
+            return new Promise((resolve) => {
+              const url = `${BASE}${path}`;
+              const req = http.request(url, { method: method.toUpperCase() }, (res) => {
+                resolve({ method, path, status: res.statusCode });
+              });
+              req.on("error", () => resolve({ method, path, status: null }));
+              req.end();
+            });
+          }
+
+          (async () => {
+            const failures = [];
+            for (const [path, methods] of Object.entries(spec.paths)) {
+              if (SKIP_PATHS.has(path)) continue;
+              for (const method of Object.keys(methods)) {
+                if (SKIP_METHODS.has(method)) continue;
+                const result = await probe(method, path);
+                // A reachable route returns any status except 404/405
+                if (result.status === 404 || result.status === 405 || result.status === null) {
+                  failures.push(`${method.toUpperCase()} ${path} → ${result.status ?? "unreachable"}`);
+                } else {
+                  console.log(`✓ ${method.toUpperCase()} ${path} → ${result.status}`);
+                }
+              }
+            }
+            if (failures.length > 0) {
+              console.error("\nSpec routes missing from server:");
+              failures.forEach((f) => console.error("  ✗ " + f));
+              process.exit(1);
+            }
+            console.log("\nAll probed spec routes are reachable.");
+          })();
+          EOF
+
+      - name: Stop backend server
+        if: always()
+        run: kill "$SERVER_PID" 2>/dev/null || true

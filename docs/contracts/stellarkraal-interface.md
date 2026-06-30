@@ -18,14 +18,18 @@ The contract manages livestock-backed loans with the following responsibilities:
 ### `initialize(env, admin, oracle, token, treasury, ltv_bps, liquidation_threshold_bps)`
 - Description: Set initial protocol parameters and default fee, treasury, loan, and price state.
 - Parameters:
-  - `admin` — admin address with permission to update protocol settings.
+  - `admin` — admin address with permission to update protocol settings. Must not be the all-zeros Stellar account.
   - `oracle` — authorized oracle address for price submissions.
   - `token` — token address used for SAC disbursements and repayments.
   - `treasury` — fee recipient address.
-  - `ltv_bps` — loan-to-value ratio in basis points (e.g. `6000` = 60%).
-  - `liquidation_threshold_bps` — liquidation health threshold in basis points.
+  - `ltv_bps` — loan-to-value ratio in basis points (e.g. `6000` = 60%). Must be in the range 1–9000 inclusive.
+  - `liquidation_threshold_bps` — liquidation health threshold in basis points. Must be ≥ `ltv_bps`.
 - Returns: `Result<(), Error>`.
 - State changes: stores admin, oracle, token, treasury, LTV, liquidation threshold, fee rates, close factor, interest rate model, liquidity tracking, TWAP defaults, and oracle validation parameters.
+- Errors:
+  - `AlreadyInitialized` (#2) if called more than once.
+  - `Unauthorized` (#3) if `admin` is the all-zeros account (`GAAA…WHF`).
+  - `InvalidAmount` (#8) if `ltv_bps` is 0 or > 9000, or if `liquidation_threshold_bps` < `ltv_bps`.
 
 ### `is_paused(env)`
 - Description: Query whether the contract is currently paused.
@@ -109,7 +113,7 @@ The contract manages livestock-backed loans with the following responsibilities:
   - `loan_id` — loan identifier.
   - `amount` — repayment amount.
 - Returns: `Result<(), Error>`.
-- State changes: transfers repayment into contract, deducts interest fee to treasury, reduces outstanding balance, updates status to `Repaid` when completed, emits loan repaid event.
+- State changes: transfers repayment into contract, deducts interest fee to treasury, reduces outstanding balance, updates status to `Repaid` when completed, emits `loan_repaid` event.
 
 ### `liquidate(env, liquidator, loan_id, repay_amount)`
 - Description: Liquidate a loan whose health factor is below 1.
@@ -119,6 +123,30 @@ The contract manages livestock-backed loans with the following responsibilities:
   - `repay_amount` — amount to repay subject to close-factor cap.
 - Returns: `Result<(), Error>`.
 - State changes: transfers repayment into contract, reduces outstanding balance, updates loan status to `Liquidated` if fully repaid, emits loan liquidated event.
+- Whitelist behaviour: when the liquidator whitelist is **empty** any address may call this function (backward-compatible open mode). When at least one address has been added via `add_liquidator`, only whitelisted addresses are permitted; others receive `LiquidatorNotWhitelisted`.
+
+### `add_liquidator(env, admin, liquidator)`
+- Description: Add an address to the approved liquidator whitelist. Idempotent — adding the same address twice has no effect.
+- Parameters:
+  - `admin` — must match the stored admin address.
+  - `liquidator` — address to approve as a liquidator.
+- Returns: `Result<(), Error>`.
+- State changes: stores a `WhitelistEntry` in persistent storage, increments the whitelist count, emits a `whitelist/added` event.
+
+### `remove_liquidator(env, admin, liquidator)`
+- Description: Remove an address from the approved liquidator whitelist. Idempotent — removing an address that is not on the list is a no-op.
+- Parameters:
+  - `admin` — must match the stored admin address.
+  - `liquidator` — address to remove from the whitelist.
+- Returns: `Result<(), Error>`.
+- State changes: removes the `WhitelistEntry` from persistent storage, decrements the whitelist count, emits a `whitelist/removed` event.
+
+### `is_whitelisted(env, liquidator)`
+- Description: Query whether an address is permitted to liquidate. Returns `true` when the whitelist is empty (open mode) or when the address has been added via `add_liquidator`.
+- Parameters:
+  - `liquidator` — address to check.
+- Returns: `bool`.
+- State changes: none.
 
 ### `set_close_factor(env, admin, close_factor_bps)`
 - Description: Update the maximum liquidation repayment percentage.
@@ -162,6 +190,13 @@ The contract manages livestock-backed loans with the following responsibilities:
 - Returns: `Result<Vec<CollateralRecord>, Error>`.
 - State changes: none.
 
+### `get_collateral_count(env, owner)`
+- Description: Get the number of non-liquidated collaterals registered by an owner.
+- Parameters:
+  - `owner` — owner address.
+- Returns: `u32` — count of non-liquidated collaterals. Returns 0 if none.
+- State changes: none.
+
 ### `update_fee_config(env, admin, origination_fee_bps, interest_fee_bps)`
 - Description: Update origination and interest fee rates.
 - Parameters:
@@ -201,6 +236,50 @@ The contract manages livestock-backed loans with the following responsibilities:
 - State changes: none.
 
 > **Oracle design:** The protocol supports multiple registered oracles with on-chain median aggregation and a configurable quorum (`add_oracle`, `remove_oracle`, `get_oracles`, `submit_oracle_prices`), in addition to the single-oracle `submit_price` + TWAP path documented below. For the trust model, dispute handling, the relationship to the off-chain appraisal cache (`backend/src/utils/appraisalCache.ts`), and rationale, see [ADR-006: Oracle design](../adr/ADR-006-oracle-design.md).
+
+### `get_oracles(env)`
+- Description: Return the current list of registered oracle addresses. If the multi-oracle `ORACLES` store has not been written yet (i.e. only the legacy single `ORACLE` key exists), it falls back to returning a one-element Vec containing that address.
+- Parameters: none.
+- Returns: `Vec<Address>` — ordered list of registered oracle addresses (0–5 entries).
+- State changes: none.
+- Example:
+  ```bash
+  stellar contract invoke \
+    --id "$CONTRACT_ID" \
+    --fn get_oracles \
+    --network "$NETWORK" \
+    --rpc-url "$RPC_URL"
+  ```
+
+### `add_oracle(env, admin, oracle)`
+- Description: Register an additional oracle address. Maximum of 5 oracles allowed.
+- Parameters:
+  - `admin` — must match the stored admin address.
+  - `oracle` — oracle address to add.
+- Returns: `Result<(), Error>`.
+- State changes: appends address to `ORACLES`, emits no event.
+- Errors: `Unauthorized` (non-admin), `OracleAlreadyRegistered` (#16), `OracleLimitReached` (#17 when count ≥ 5).
+
+### `remove_oracle(env, admin, oracle)`
+- Description: Deregister an existing oracle address.
+- Parameters:
+  - `admin` — must match the stored admin address.
+  - `oracle` — oracle address to remove.
+- Returns: `Result<(), Error>`.
+- State changes: removes address from `ORACLES`.
+- Errors: `Unauthorized` (non-admin), `OracleNotFound` (#16 when address not present).
+
+### `submit_oracle_prices(env, submitter, prices)`
+- Description: Submit a price vector (one price per registered oracle) and compute the on-chain median. Prices equal to zero are treated as non-responses. A minimum quorum of 3 responses is required when 3 or more oracles are registered; otherwise the quorum equals the oracle count.
+- Parameters:
+  - `submitter` — any authenticated address.
+  - `prices` — `Vec<i128>` whose length must equal the number of registered oracles. A zero entry indicates that oracle did not respond.
+- Returns: `Result<OracleReport, Error>` where `OracleReport` contains:
+  - `median: i128` — median of non-zero prices after sorting.
+  - `responses: u32` — count of non-zero prices.
+  - `flagged_count: u32` — count of prices deviating >50% from the median.
+- State changes: none (read-only aggregation; the caller decides how to use the result).
+- Errors: `InvalidPrice` (#18) if `prices.len() != oracles.len()`, `InsufficientOracleQuorum` (#17) if non-zero responses < quorum.
 
 ### `set_oracle_config(env, admin, price_min, price_max, staleness_threshold, max_deviation_bps)`
 - Description: Configure price bounds and freshness validation.
@@ -266,6 +345,7 @@ The contract manages livestock-backed loans with the following responsibilities:
 | 18 | `PriceAboveMax` | Oracle price above configured maximum. |
 | 19 | `PriceStale` | Submitted price is too old. |
 | 20 | `PriceDeviationExceeded` | Price change exceeds allowed deviation. |
+| 20 | `LiquidatorNotWhitelisted` | Caller is not on the approved liquidator whitelist. |
 
 ## On-Chain State
 
@@ -281,6 +361,8 @@ Key contract storage state used by the interface:
 - `TOTAL_BORROWED`, `TOTAL_LIQUIDITY` — liquidity tracking state.
 - `LAST_PRICE`, `LAST_PRICE_TIME`, `TWAP_PRICE`, `TWAP_SUM`, `TWAP_COUNT`, `TWAP_WINDOW` — oracle price and TWAP state.
 - `PRICE_MIN`, `PRICE_MAX`, `STALE_THR`, `DEV_BPS` — oracle validation configuration.
+- `WL_COUNT` — instance storage count of whitelisted liquidators (0 = open mode).
+- `WhitelistEntry(Address)` — persistent storage flag per approved liquidator address.
 
 ## Invoking the Contract with `stellar-cli`
 
@@ -363,8 +445,39 @@ stellar contract invoke \
   --rpc-url "$RPC_URL"
 ```
 
+### Transfer collateral ownership
+
+```bash
+stellar contract invoke \
+  --id "$CONTRACT_ID" \
+  --fn transfer_collateral \
+  --arg address:$CURRENT_OWNER \
+  --arg u64:$COLLATERAL_ID \
+  --arg address:$NEW_OWNER \
+  --network "$NETWORK" \
+  --rpc-url "$RPC_URL" \
+  --source "$CURRENT_OWNER"
+```
+
 ## Notes
 
 - The contract uses `submit_price` to validate oracle updates before they affect TWAP state.
 - Repayments are allowed even when the contract is paused, while new loans and liquidations are blocked.
 - Liquidations are only permitted when `health_factor` is below 10,000 and the repay amount does not exceed `CLOSE_FACTOR`.
+
+## Storage TTL Strategy
+
+Soroban persistent storage entries expire after a configurable number of ledgers. Loan and collateral records are long-lived (active for the duration of a loan, potentially months), so every write to a `Loan` or `Collateral` entry is followed by an `extend_ttl` call.
+
+| Constant | Value | Approximate duration |
+|---|---|---|
+| `PERSISTENT_TTL_THRESHOLD` | 100,000 ledgers | ~5.7 days |
+| `PERSISTENT_TTL_LEDGERS` | 518,400 ledgers | ~30 days |
+
+**Behaviour:** On each write the entry's TTL is extended to `PERSISTENT_TTL_LEDGERS` only when its current TTL has fallen below `PERSISTENT_TTL_THRESHOLD`. This means:
+
+- A freshly created or recently updated entry will not incur a redundant extend ledger write.
+- An entry that hasn't been touched for ~24 days will be extended back to 30 days on the next interaction.
+- Both constants are compile-time values (`pub const`) in `lib.rs` and can be adjusted for different network configurations without changing contract logic.
+
+**Off-chain responsibility:** The TTL extension inside the contract only fires on writes triggered by contract invocations. Callers (backend or keeper bots) should additionally invoke `ExtendFootprintTTLOp` for dormant entries (loans where no repayment has occurred for an extended period) to prevent archival. See [Stellar docs — state archival](https://developers.stellar.org/docs/learn/fundamentals/contract-development/storage/state-archival).
