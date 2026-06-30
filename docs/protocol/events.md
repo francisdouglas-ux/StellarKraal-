@@ -11,17 +11,18 @@ All events follow the Soroban `env.events().publish(topics, data)` convention:
 
 ## Events
 
-### `livestock / registered`
+### `collateral_registered`
 
 Emitted by `register_livestock` when a new collateral record is created.
 
-| Field | Type | Description |
-|---|---|---|
-| `id` | `u64` | Assigned collateral ID |
-| `owner` | `Address` | Owner's Stellar address |
-| `animal_type` | `Symbol` | Species symbol (e.g. `cattle`) |
-| `count` | `u32` | Number of animals |
-| `appraised_value` | `i128` | Oracle-appraised total value |
+| Field | Topic/Data | Type | Description |
+|---|---|---|---|
+| `collateral_registered` | topic[0] | `Symbol` | Event discriminator |
+| `owner` | topic[1] | `Address` | Owner's Stellar address |
+| `collateral_id` | data[0] | `u64` | Assigned collateral ID |
+| `animal_type` | data[1] | `Symbol` | Species symbol (e.g. `cattle`) |
+| `count` | data[2] | `u32` | Number of animals |
+| `appraised_value` | data[3] | `i128` | Oracle-appraised total value |
 
 ### `loan / requested`
 
@@ -73,7 +74,7 @@ Emitted when origination or interest fees are transferred to the treasury.
 Topics follow the pattern `(namespace, action)` using `symbol_short!` macros:
 
 ```
-(symbol_short!("livestock"), symbol_short!("registered"))
+(Symbol::new(&env, "collateral_registered"), owner)   // collateral registration
 (symbol_short!("loan"),      symbol_short!("requested"))
 (symbol_short!("loan"),      symbol_short!("repaid"))
 (symbol_short!("loan"),      symbol_short!("liquidated"))
